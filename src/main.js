@@ -1,7 +1,16 @@
-// src/main.js
+// src/main.js — 거제동 골목길 씬 조립
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { asphalt } from './textures.js';
+import { fromAsset } from './textures.js';
+import { Player } from './player.js';
+import { createStreet, createRoadText, createCrosswalk } from './kit/street.js';
+import { createBuilding } from './kit/buildings.js';
+import { createSchoolWall, createSchoolBuilding } from './kit/school.js';
+import {
+  createUtilityPole, createWires, createCar, createRoadSign,
+  createExcavator, createDirtPile, createConstructionFence,
+} from './kit/props.js';
+import { ALLEY, BUILDINGS, CARS, POLES, SIGNS, CONSTRUCTION } from './layout.js';
 
 const overlay = document.getElementById('overlay');
 
@@ -51,16 +60,96 @@ sun.target.position.set(0, 0, 80);
 scene.add(sun, sun.target);
 scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x8a8070, 0.9));
 
-// 임시 바닥 (Task 4에서 street.js로 대체)
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(400, 400),
-  new THREE.MeshStandardMaterial({ map: asphalt([40, 40]), roughness: 0.95 })
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+// 플레이어 (오버레이 클릭 → 포인터 락, lock/unlock으로 오버레이 표시 전환)
+const player = new Player(camera, renderer.domElement, overlay);
 
-overlay.addEventListener('click', () => overlay.classList.add('hidden'));
+// 충돌 등록 헬퍼
+function addWithCollider(obj) {
+  scene.add(obj);
+  obj.updateMatrixWorld(true);
+  player.addCollider(new THREE.Box3().setFromObject(obj));
+}
+
+// 주변 지면 (흙색) + 도로·보도·노면 표시
+const dirt = new THREE.Mesh(
+  new THREE.PlaneGeometry(500, 500),
+  new THREE.MeshStandardMaterial({ color: 0x8a8275, roughness: 1 })
+);
+dirt.rotation.x = -Math.PI / 2;
+dirt.position.y = -0.02;
+dirt.receiveShadow = true;
+scene.add(dirt);
+
+scene.add(createStreet({ length: ALLEY.length, roadWidth: ALLEY.roadWidth }));
+scene.add(createCrosswalk(6));
+scene.add(createRoadText('천천히', 14));
+scene.add(createRoadText('학교앞', 24));
+scene.add(createRoadText('천천히', 70));
+
+// 우측 건물열 (정면 +x 방향 = 도로 쪽이 되도록 90도 회전)
+for (const b of BUILDINGS) {
+  const m = createBuilding(b);
+  m.rotation.y = Math.PI / 2;
+  m.position.set(b.x, 0, b.z);
+  addWithCollider(m);
+}
+
+// 좌측 학교
+addWithCollider(createSchoolWall({ x0: 5, z0: 0, z1: ALLEY.length }));
+scene.add(createSchoolBuilding({ x: 18, z: 45, len: 50, floors: 4 }));
+scene.add(createSchoolBuilding({ x: 20, z: 110, len: 40, floors: 3 }));
+
+// 차량
+for (const c of CARS) {
+  const car = createCar(c);
+  car.position.set(c.side * (ALLEY.roadWidth / 2 - 1.1), 0, c.z);
+  addWithCollider(car);
+}
+
+// 전봇대 + 전선 (이웃끼리 연결)
+const polePts = [];
+for (const p of POLES) {
+  const pole = createUtilityPole({ transformer: Math.random() > 0.5 });
+  pole.position.set(p.x, 0, p.z);
+  scene.add(pole);
+  polePts.push(new THREE.Vector3(p.x, 0, p.z));
+}
+for (let i = 0; i + 1 < polePts.length; i++) scene.add(createWires(polePts[i], polePts[i + 1]));
+
+// 표지판
+for (const s of SIGNS) {
+  const sign = createRoadSign(s.kind);
+  sign.position.set(s.x, 0, s.z);
+  sign.rotation.y = -Math.PI / 2 * Math.sign(s.x);
+  scene.add(sign);
+}
+
+// 공사장 (구간4 우측)
+{
+  const { z0, z1, x } = CONSTRUCTION;
+  const ex = createExcavator();
+  ex.position.set(x, 0, (z0 + z1) / 2);
+  ex.rotation.y = 0.6;
+  addWithCollider(ex);
+  const dirt1 = createDirtPile({ r: 2.5 }); dirt1.position.set(x - 3, 0, z0 + 2); addWithCollider(dirt1);
+  const dirt2 = createDirtPile({ r: 1.8, h: 1 }); dirt2.position.set(x + 1, 0, z1 - 1); addWithCollider(dirt2);
+  const cf = createConstructionFence(z1 - z0 + 4);
+  cf.position.set(x + 4, 0, (z0 + z1) / 2);
+  addWithCollider(cf);
+}
+
+// 모텔 체크 타일 입구 (마지막 건물 앞 바닥)
+{
+  const tile = new THREE.Mesh(new THREE.PlaneGeometry(7, 5), fromAsset('tile-checker.jpg', 0x886655));
+  tile.rotation.x = -Math.PI / 2;
+  tile.position.set(-6.5, 0.015, 150);
+  tile.receiveShadow = true;
+  scene.add(tile);
+}
+
+// 골목 경계(보이지 않는 벽): 도로 양끝
+player.addCollider(new THREE.Box3(new THREE.Vector3(-20, 0, -1), new THREE.Vector3(20, 5, 0)));
+player.addCollider(new THREE.Box3(new THREE.Vector3(-20, 0, ALLEY.length), new THREE.Vector3(20, 5, ALLEY.length + 1)));
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -68,4 +157,8 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-renderer.setAnimationLoop(() => renderer.render(scene, camera));
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  player.update(Math.min(clock.getDelta(), 0.05));
+  renderer.render(scene, camera);
+});
