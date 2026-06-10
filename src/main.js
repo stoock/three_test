@@ -1,6 +1,7 @@
 // src/main.js
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
+import { asphalt } from './textures.js';
 
 const overlay = document.getElementById('overlay');
 
@@ -53,7 +54,7 @@ scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x8a8070, 0.9));
 // 임시 바닥 (Task 4에서 street.js로 대체)
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(400, 400),
-  new THREE.MeshStandardMaterial({ color: 0x555555 })
+  new THREE.MeshStandardMaterial({ map: asphalt([40, 40]), roughness: 0.95 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
