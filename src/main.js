@@ -26,29 +26,35 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.75;
+renderer.toneMappingExposure = 0.85;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xcfd8e8, 120, 400);
+scene.fog = new THREE.Fog(0xd8e0ee, 150, 520);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1200);
 camera.position.set(0, 1.6, 2);
 camera.lookAt(0, 1.6, 20);
 
+// 디버그: ?z=숫자 로 시작 위치, ?rx=라디안 으로 시작 시점(yaw) 지정
+const q = new URLSearchParams(location.search);
+if (q.has('z')) { camera.position.z = +q.get('z'); camera.lookAt(0, 1.6, camera.position.z + 20); }
+if (q.has('rx')) camera.rotation.y += +q.get('rx');
+if (q.has('z') || q.has('rx')) document.getElementById('overlay').classList.add('hidden');
+
 // 하늘 + 태양 (맑은 오후)
 const sky = new Sky();
 sky.scale.setScalar(1000);
 scene.add(sky);
-const sunDir = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(50), THREE.MathUtils.degToRad(140));
+const sunDir = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(38), THREE.MathUtils.degToRad(140));
 sky.material.uniforms.turbidity.value = 6;
 sky.material.uniforms.rayleigh.value = 1.5;
 sky.material.uniforms.mieCoefficient.value = 0.004;
 sky.material.uniforms.mieDirectionalG.value = 0.85;
 sky.material.uniforms.sunPosition.value.copy(sunDir);
 
-const sun = new THREE.DirectionalLight(0xfff2dd, 3.2);
+const sun = new THREE.DirectionalLight(0xfff0d8, 3.6);
 sun.position.copy(sunDir).multiplyScalar(180);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
@@ -58,7 +64,7 @@ sun.shadow.camera.near = 10; sun.shadow.camera.far = 450;
 sun.shadow.bias = -0.0004;
 sun.target.position.set(0, 0, 80);
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x8a8070, 0.9));
+scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x8a8070, 0.7));
 
 // 플레이어 (오버레이 클릭 → 포인터 락, lock/unlock으로 오버레이 표시 전환)
 const player = new Player(camera, renderer.domElement, overlay);
