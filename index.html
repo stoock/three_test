@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>거제동 골목길 산책</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: sans-serif; }
+  #overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: rgba(0,0,0,0.65); color: #fff; cursor: pointer; z-index: 10;
+  }
+  #overlay h1 { font-size: 28px; margin: 0; }
+  #overlay p { margin: 0; opacity: 0.85; }
+  #overlay.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="overlay">
+  <h1>거제동 골목길 산책</h1>
+  <p>클릭하여 시작 — W A S D 이동 · 마우스 시점 · Shift 달리기 · ESC 일시정지</p>
+  <p id="webgl-warn" style="color:#f88; display:none;">이 브라우저는 WebGL을 지원하지 않습니다.</p>
+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
