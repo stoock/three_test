@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>여의도 공원 산책 - Yeouido Park Walk</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🌳</text></svg>" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    #app { width: 100%; height: 100%; }
+    canvas { display: block; }
+
+    #overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(10, 25, 15, 0.78);
+      color: #fff; z-index: 10; cursor: pointer;
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      text-align: center;
+    }
+    #overlay h1 { font-size: 44px; margin-bottom: 8px; letter-spacing: 2px; }
+    #overlay h2 { font-size: 18px; font-weight: 400; color: #b8e6c0; margin-bottom: 36px; }
+    #overlay .controls {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 12px; padding: 22px 36px;
+      font-size: 16px; line-height: 2;
+    }
+    #overlay .controls b {
+      display: inline-block; min-width: 88px;
+      color: #ffd866; text-align: left;
+    }
+    #overlay .start { margin-top: 32px; font-size: 20px; color: #8ef0a0; animation: pulse 1.6s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    #hud {
+      position: fixed; left: 0; right: 0; bottom: 0; top: 0;
+      pointer-events: none; z-index: 5; display: none;
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    }
+    #crosshair {
+      position: absolute; left: 50%; top: 50%;
+      width: 6px; height: 6px; margin: -3px 0 0 -3px;
+      border-radius: 50%; background: rgba(255,255,255,0.85);
+      box-shadow: 0 0 4px rgba(0,0,0,0.6);
+    }
+    #zone {
+      position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+      color: #fff; font-size: 22px; font-weight: 700;
+      text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+      letter-spacing: 1px;
+    }
+    #staminaWrap {
+      position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+      width: 240px;
+    }
+    #staminaWrap .label {
+      color: #fff; font-size: 12px; margin-bottom: 4px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8); text-align: center;
+    }
+    #staminaBar {
+      width: 100%; height: 10px; border-radius: 5px;
+      background: rgba(0,0,0,0.45); overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.35);
+    }
+    #staminaFill {
+      height: 100%; width: 100%;
+      background: linear-gradient(90deg, #4caf50, #8ef0a0);
+      transition: width 0.1s linear;
+    }
+    #staminaFill.tired { background: linear-gradient(90deg, #d84a4a, #ff8a65); }
+    #hint {
+      position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.75); font-size: 13px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="overlay">
+    <h1>여의도 공원</h1>
+    <h2>Yeouido Park — 봄날의 산책</h2>
+    <div class="controls">
+      <div><b>W A S D</b> 이동</div>
+      <div><b>마우스</b> 시점 회전</div>
+      <div><b>Shift</b> 달리기 (스태미나 소모)</div>
+      <div><b>Space</b> 점프</div>
+      <div><b>ESC</b> 일시정지</div>
+    </div>
+    <div class="start">▶ 화면을 클릭하면 산책이 시작됩니다</div>
+  </div>
+
+  <div id="hud">
+    <div id="crosshair"></div>
+    <div id="zone"></div>
+    <div id="hint">Shift 를 누르면 달릴 수 있어요</div>
+    <div id="staminaWrap">
+      <div class="label">스태미나</div>
+      <div id="staminaBar"><div id="staminaFill"></div></div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
