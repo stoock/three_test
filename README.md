@@ -39,8 +39,15 @@ npx serve .
 
 ## 기술
 
-- [Three.js](https://threejs.org/) r160 (importmap + CDN, 빌드 불필요)
+- [Three.js](https://threejs.org/) r160 (vendor 디렉토리에 포함, 빌드 불필요·오프라인 동작)
 - `PointerLockControls` 기반 1인칭 시점
-- 나무 ~300그루 인스턴싱(`InstancedMesh`) 렌더링
+- **실사 지향 렌더링**
+  - `Sky` 물리 기반 대기 산란 하늘 + 하늘을 PMREM 으로 구운 환경광/반사(IBL)
+  - `Water` 셰이더 연못 — 주변 빌딩과 나무가 실시간 반사
+  - ACES Filmic 톤매핑, 부드러운 그림자(PCFSoft), 거리 안개
+  - 외부 이미지 없이 캔버스로 생성한 프로시저럴 텍스처: 잔디, 자갈길,
+    보도블록, 우레탄 트랙, 나무껍질, 잎 디테일, 빌딩 유리창, 물 노멀맵
+- 정점 지터로 울퉁불퉁하게 만든 유기적 수관 + 개체별 색 변화(`instanceColor`),
+  나무 ~300그루 인스턴싱(`InstancedMesh`) 렌더링
 - 원형 충돌체 기반 간단한 충돌 처리, 스태미나/점프/헤드밥 등 이동 메커닉
 - 플레이어를 따라다니는 그림자 카메라로 넓은 맵에서도 선명한 그림자 유지
