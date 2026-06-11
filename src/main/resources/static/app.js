@@ -171,28 +171,32 @@ function renderScenario(id) {
 
         <div class="tabs">
             <div class="tab active" data-tab="concept" tabindex="0">📖 개념 설명</div>
-            <div class="tab" data-tab="tips" tabindex="0">💡 실무 팁</div>
-            <div class="tab" data-tab="production" tabindex="0">🏭 운영 활용</div>
-            <div class="tab" data-tab="code" tabindex="0">💻 실행 코드</div>
+            <div class="tab" data-tab="guide" tabindex="0">💡 실무 가이드</div>
+            <div class="tab" data-tab="code" tabindex="0">💻 핵심 코드</div>
         </div>
         <div id="tab-body"></div>
 
         <div class="run-bar">
             <button class="btn" id="run-btn">▶ 실행하기</button>
-            <span class="run-hint">실행하면 데이터가 초기화된 후 시나리오가 단계별로 수행되고,
-            실제 실행된 SQL과 예외가 아래에 표시됩니다.</span>
+            <span class="run-hint">서버에 준비된 이 시나리오 코드를 실제로 실행합니다 (💻 핵심 코드 탭이 그 요약입니다).
+            데이터가 초기화된 후 단계별로 수행되고, 실행된 SQL과 예외가 아래에 표시됩니다.</span>
         </div>
         <div id="run-output"></div>`;
 
     const tabBody = document.getElementById('tab-body');
     const renderTab = (tab) => {
         if (tab === 'code') {
-            tabBody.innerHTML = `<pre class="code-block">${esc(s.code.trim())}</pre>`;
+            tabBody.innerHTML = `<pre class="code-block">${esc(s.code.trim())}</pre>
+                <p class="notice">▶ 실행하기 버튼은 이 흐름으로 작성된 서버의 시나리오(Java)를 실행합니다 —
+                위 코드는 그 핵심을 읽기 좋게 간추린 것이고, 실행 결과의 단계들과 순서가 같습니다.</p>`;
         } else if (tab === 'concept') {
             const dia = (typeof DIAGRAMS !== 'undefined' && DIAGRAMS[s.id]) || '';
-            tabBody.innerHTML = dia + `<div class="card doc">${md(s[tab])}</div>`;
-        } else {
-            tabBody.innerHTML = `<div class="card doc">${md(s[tab])}</div>`;
+            tabBody.innerHTML = dia + `<div class="card doc">${md(s.concept)}</div>`;
+        } else { // guide: 실무 팁 + 운영 활용 통합
+            tabBody.innerHTML = `<div class="card doc">
+                <div class="guide-section">🛠 코드 작성할 때 — 실무 팁</div>${md(s.tips)}
+                <div class="guide-section">🏭 운영에서 자주 쓰는 방법</div>${md(s.production)}
+            </div>`;
         }
     };
     renderTab('concept');

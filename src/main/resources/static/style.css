@@ -101,6 +101,13 @@ nav .nav-item.active {
 }
 .doc strong { color: #11141f; }
 
+.guide-section {
+    font-size: 13px; font-weight: 800; color: var(--accent-dark);
+    background: #eef2ff; border-radius: 8px; padding: 8px 14px;
+    margin: 6px 0 12px;
+}
+.guide-section:not(:first-child) { margin-top: 22px; }
+
 pre.code-block {
     background: var(--code-bg); color: var(--code-text);
     padding: 18px 20px; border-radius: 10px; overflow-x: auto;
