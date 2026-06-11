@@ -5,6 +5,7 @@ const state = {
     schema: [],
     current: null, // 'intro' | 'scratchpad' | scenarioId
     padType: 'jpql',
+    padQueries: { jpql: '', sql: '' }, // 탭별로 작성 중인 쿼리 보존
 };
 
 const nav = document.getElementById('nav');
@@ -104,14 +105,39 @@ function renderIntro() {
 
         <div class="card">
             <p style="font-weight:800; margin-bottom:12px">📦 학습용 도메인 모델</p>
-            <div class="doc"><p><code>Team</code> 1 ─ N <code>Member</code> (양방향) ·
-            <code>Order</code> 1 ─ N <code>OrderItem</code> N ─ 1 <code>Product</code> ·
-            <code>Item</code> ← <code>Book</code> / <code>Album</code> (SINGLE_TABLE 상속) ·
-            <code>Member.address</code> 는 임베디드 타입</p></div>
-            <div class="pad-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-top: 10px">
+            <div class="erd-wrap">${domainErd()}</div>
+            <div class="pad-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-top: 16px">
                 ${entityRows}
             </div>
         </div>`;
+}
+
+/** 도메인 모델 ERD (SVG) */
+function domainErd() {
+    const entity = (x, y, w, title, fields, sub = false) => {
+        const h = 30 + fields.length * 16;
+        return `<rect class="erd-box ${sub ? 'sub' : ''}" x="${x}" y="${y}" width="${w}" height="${h}" rx="10"/>
+            <text class="erd-title" x="${x + 12}" y="${y + 20}">${title}</text>
+            <line x1="${x + 8}" y1="${y + 28}" x2="${x + w - 8}" y2="${y + 28}" style="stroke:#dfe4f3;stroke-width:1"/>` +
+            fields.map((f, i) =>
+                `<text class="erd-field ${f.startsWith('*') ? 'key' : ''}" x="${x + 12}" y="${y + 44 + i * 16}">${f.replace(/^\*/, '')}</text>`
+            ).join('');
+    };
+    const label = (x, y, t) => `<text class="erd-label" x="${x}" y="${y}" text-anchor="middle">${t}</text>`;
+    const line = (points) => `<polyline class="erd-line" points="${points}"/>`;
+
+    return `<svg viewBox="0 0 780 390" width="780">
+        ${entity(40, 62, 150, 'Team', ['*id (PK)', 'name', 'members ⇄ 양방향'])}
+        ${entity(300, 42, 195, 'Member', ['*id (PK)', 'name · age', 'city/street/zipcode', '└ Address 임베디드', '*team_id (FK)'])}
+        ${entity(588, 42, 165, 'Item ◁ Book/Album', ['*dtype (구분 컬럼)', 'id · name · price', 'author·isbn (Book)', 'artist (Album)', 'SINGLE_TABLE 상속'])}
+        ${entity(70, 255, 175, 'Order (orders)', ['*id (PK)', '*member_id (FK)', 'status · orderDate', 'cascade ALL+고아제거'])}
+        ${entity(330, 255, 185, 'OrderItem', ['*id (PK)', '*order_id (FK)', '*product_id (FK)', 'orderPrice · count'])}
+        ${entity(588, 255, 165, 'Product', ['*id (PK)', 'name · price', 'stockQuantity', '*version (@Version)'])}
+        ${line('190,100 300,100')} ${label(245, 92, '1 ─ N')}
+        ${line('370,162 370,210 157,210 157,255')} ${label(263, 203, '1 ─ N 주문')}
+        ${line('245,305 330,305')} ${label(287, 297, '1 ─ N')}
+        ${line('515,305 588,305')} ${label(551, 297, 'N ─ 1')}
+    </svg>`;
 }
 
 /* ---------------- 시나리오 페이지 ---------------- */
@@ -143,6 +169,9 @@ function renderScenario(id) {
     const renderTab = (tab) => {
         if (tab === 'code') {
             tabBody.innerHTML = `<pre class="code-block">${esc(s.code.trim())}</pre>`;
+        } else if (tab === 'concept') {
+            const dia = (typeof DIAGRAMS !== 'undefined' && DIAGRAMS[s.id]) || '';
+            tabBody.innerHTML = dia + `<div class="card doc">${md(s[tab])}</div>`;
         } else {
             tabBody.innerHTML = `<div class="card doc">${md(s[tab])}</div>`;
         }
@@ -263,13 +292,27 @@ function renderScratchpad() {
         </div>`;
 
     const textarea = document.getElementById('pad-query');
+    textarea.value = state.padQueries[state.padType]; // 페이지를 떠났다 와도 유지
+    textarea.addEventListener('input', () => {
+        state.padQueries[state.padType] = textarea.value;
+    });
+
     const renderTypeButtons = () => {
         document.getElementById('type-jpql').classList.toggle('active', state.padType === 'jpql');
         document.getElementById('type-sql').classList.toggle('active', state.padType === 'sql');
+        textarea.placeholder = state.padType === 'jpql' ? 'select m from Member m' : 'select * from member';
         renderExamples();
     };
-    document.getElementById('type-jpql').onclick = () => { state.padType = 'jpql'; renderTypeButtons(); };
-    document.getElementById('type-sql').onclick = () => { state.padType = 'sql'; renderTypeButtons(); };
+    // 탭(JPQL/SQL)별로 작성 중인 쿼리를 각각 보존하고, 전환 시 해당 탭의 쿼리를 복원한다
+    const switchType = (type) => {
+        if (state.padType === type) return;
+        state.padQueries[state.padType] = textarea.value;
+        state.padType = type;
+        textarea.value = state.padQueries[type];
+        renderTypeButtons();
+    };
+    document.getElementById('type-jpql').onclick = () => switchType('jpql');
+    document.getElementById('type-sql').onclick = () => switchType('sql');
 
     function renderExamples() {
         const list = EXAMPLES[state.padType];
@@ -278,7 +321,11 @@ function renderScratchpad() {
             list.map((ex, i) =>
                 `<span class="example-chip ${ex.danger ? 'danger' : ''}" data-i="${i}">${esc(ex.label)}</span>`).join('');
         document.querySelectorAll('.example-chip').forEach(el => {
-            el.onclick = () => { textarea.value = list[el.dataset.i].q; textarea.focus(); };
+            el.onclick = () => {
+                textarea.value = list[el.dataset.i].q;
+                state.padQueries[state.padType] = textarea.value;
+                textarea.focus();
+            };
         });
     }
 
