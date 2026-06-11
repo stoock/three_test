@@ -6,7 +6,11 @@ const state = {
     current: null, // 'intro' | 'scratchpad' | scenarioId
     padType: 'jpql',
     padQueries: { jpql: '', sql: '' }, // 탭별로 작성 중인 쿼리 보존
+    schemaOpen: { Member: true },      // 레퍼런스 아코디언 펼침 상태 (페이지 이동에도 유지)
 };
+
+/** JPQL 기본 별칭 */
+const ALIASES = { Member: 'm', Team: 't', Order: 'o', OrderItem: 'oi', Product: 'p', Item: 'i', Book: 'b', Album: 'a' };
 
 const nav = document.getElementById('nav');
 const content = document.getElementById('content');
@@ -277,13 +281,6 @@ const EXAMPLES = {
 };
 
 function renderScratchpad() {
-    const schemaHtml = state.schema.map(e =>
-        `<div class="schema-entity"><div class="schema-entity-name">${esc(e.name)}</div>` +
-        e.attributes.map(a =>
-            `<div class="schema-attr ${a.kind !== '필드' ? 'assoc' : ''}">` +
-            `<span>${esc(a.name)}</span><span class="attr-type">${esc(a.type)}${a.kind !== '필드' ? ' · ' + a.kind : ''}</span></div>`
-        ).join('') + '</div>').join('');
-
     content.innerHTML = `
         <h1 class="page-title">🧪 스크래치 패드</h1>
         <p class="page-summary">JPQL 또는 네이티브 SQL을 직접 실행해 보세요. 결과·실제 실행된 SQL·예외가 그대로 표시됩니다.
@@ -304,10 +301,11 @@ function renderScratchpad() {
                 <div id="pad-output"></div>
             </div>
             <div class="card schema-panel">
-                <p style="font-weight:800; margin-bottom:10px">📦 엔티티 레퍼런스</p>
-                ${schemaHtml}
-                <p class="notice">JPQL은 <b>엔티티명/필드명</b>(대소문자 구분), 네이티브 SQL은 <b>테이블/컬럼명</b>을 사용합니다.
-                Order 테이블은 예약어 문제로 <code>orders</code> 입니다.</p>
+                <p style="font-weight:800; margin-bottom:8px">📦 엔티티 레퍼런스</p>
+                <input class="schema-search" id="schema-search" type="search"
+                       placeholder="🔎 엔티티/필드/컬럼 검색" autocomplete="off">
+                <div class="schema-hint" id="schema-hint"></div>
+                <div id="schema-list"></div>
             </div>
         </div>`;
 
@@ -322,6 +320,7 @@ function renderScratchpad() {
         document.getElementById('type-sql').classList.toggle('active', state.padType === 'sql');
         textarea.placeholder = state.padType === 'jpql' ? 'select m from Member m' : 'select * from member';
         renderExamples();
+        renderSchemaPanel(); // 모드에 맞춰 엔티티/테이블 이름 전환
     };
     // 탭(JPQL/SQL)별로 작성 중인 쿼리를 각각 보존하고, 전환 시 해당 탭의 쿼리를 복원한다
     const switchType = (type) => {
@@ -353,6 +352,80 @@ function renderScratchpad() {
             el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); } };
         });
     }
+
+    /* ----- 엔티티 레퍼런스 패널 ----- */
+    let schemaFilter = '';
+
+    function renderSchemaPanel() {
+        const sqlMode = state.padType === 'sql';
+        document.getElementById('schema-hint').innerHTML = sqlMode
+            ? '네이티브 SQL 모드 — <b>테이블·컬럼명</b> 기준. 항목을 클릭하면 커서 위치에 입력됩니다.'
+            : 'JPQL 모드 — <b>엔티티·필드명</b>(대소문자 구분) 기준. 항목을 클릭하면 별칭과 함께(<code>m.name</code>) 커서 위치에 입력됩니다.';
+
+        const filter = schemaFilter.trim().toLowerCase();
+        document.getElementById('schema-list').innerHTML = state.schema.map(e => {
+            const alias = ALIASES[e.name] || e.name[0].toLowerCase();
+            const entityMatch = e.name.toLowerCase().includes(filter) || e.table.toLowerCase().includes(filter);
+            const attrs = !filter ? e.attributes : e.attributes.filter(a =>
+                entityMatch || a.name.toLowerCase().includes(filter) || (a.column || '').toLowerCase().includes(filter));
+            if (filter && !attrs.length) return '';
+
+            const open = filter ? true : !!state.schemaOpen[e.name];
+            const baseQuery = sqlMode ? `select * from ${e.table}` : `select ${alias} from ${e.name} ${alias}`;
+
+            const rows = attrs.map(a => {
+                const noColumn = sqlMode && !a.column; // 컬렉션(mappedBy)은 이 테이블에 컬럼이 없음
+                const label = sqlMode ? (a.column || '이 테이블에 컬럼 없음') : a.name;
+                const insert = sqlMode ? a.column : alias + '.' + a.name;
+                const meta = a.isId ? '<span class="se-pk">PK</span>'
+                    : a.kind === '연관관계' ? `<span class="se-rel">→ ${esc(a.type)}</span>`
+                    : a.kind === '컬렉션' ? `<span class="se-rel">${esc(a.type)}</span>`
+                    : esc(a.type);
+                return `<button class="se-attr${noColumn ? ' off' : ''}" ${noColumn ? 'disabled' : ''}
+                            data-insert="${esc(insert)}" title="${noColumn ? 'FK는 반대쪽 테이블에 있습니다' : '클릭하면 커서 위치에 입력'}">
+                        <span class="se-attr-name">${esc(label)}</span>
+                        <span class="se-attr-meta">${meta}</span></button>`;
+            }).join('');
+
+            return `<div class="se${open ? ' open' : ''}">
+                <button class="se-header" data-ent="${esc(e.name)}">
+                    <span class="se-caret">${open ? '▾' : '▸'}</span>
+                    <span class="se-name">${esc(e.name)}</span>
+                    <span class="se-table">${esc(e.table)}</span>
+                </button>
+                ${open ? `<div class="se-body">
+                    <button class="se-base" data-q="${esc(baseQuery)}" title="입력창에 기본 조회 쿼리를 채웁니다">▶ ${esc(baseQuery)}</button>
+                    ${rows}
+                </div>` : ''}
+            </div>`;
+        }).join('') || '<p class="notice">검색 결과가 없습니다.</p>';
+    }
+
+    document.getElementById('schema-search').addEventListener('input', e => {
+        schemaFilter = e.target.value;
+        renderSchemaPanel();
+    });
+
+    document.getElementById('schema-list').addEventListener('click', e => {
+        const header = e.target.closest('.se-header');
+        if (header) {
+            state.schemaOpen[header.dataset.ent] = !state.schemaOpen[header.dataset.ent];
+            renderSchemaPanel();
+            return;
+        }
+        const base = e.target.closest('.se-base');
+        if (base) {
+            textarea.value = base.dataset.q;
+            state.padQueries[state.padType] = textarea.value;
+            textarea.focus();
+            return;
+        }
+        const attr = e.target.closest('.se-attr');
+        if (attr && !attr.disabled) {
+            insertAtCursor(textarea, attr.dataset.insert);
+            state.padQueries[state.padType] = textarea.value;
+        }
+    });
 
     renderTypeButtons();
 
@@ -449,6 +522,19 @@ function selectHeaders(query, colCount) {
 }
 
 /* ---------------- 유틸 ---------------- */
+
+/** textarea 커서 위치에 텍스트 삽입 (앞 글자와 붙으면 공백 추가) */
+function insertAtCursor(textarea, text) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const pad = before && !/[\s(.,=<>]$/.test(before) ? ' ' : '';
+    textarea.value = before + pad + text + after;
+    const pos = (before + pad + text).length;
+    textarea.focus();
+    textarea.setSelectionRange(pos, pos);
+}
 
 function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
