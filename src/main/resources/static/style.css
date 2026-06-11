@@ -59,13 +59,14 @@ nav .nav-item {
     display: block; padding: 9px 18px 9px 24px;
     font-size: 13.5px; cursor: pointer; line-height: 1.4;
     border-left: 3px solid transparent;
+    color: var(--sidebar-text); text-decoration: none;
 }
 nav .nav-item:hover { background: #262b42; color: #e3e6f2; }
+nav .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 nav .nav-item.active {
     background: var(--sidebar-active); color: #fff;
     border-left-color: var(--accent); font-weight: 600;
 }
-nav .nav-item .warn { color: #f0b35f; font-size: 12px; }
 
 /* ---------- Content ---------- */
 .content { flex: 1; padding: 32px 40px 80px; max-width: 1080px; }
@@ -79,6 +80,7 @@ nav .nav-item .warn { color: #f0b35f; font-size: 12px; }
     color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px;
 }
 .tab:hover { color: var(--text); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 .card {
@@ -137,12 +139,19 @@ pre.code-block {
 
 .log-line { font-size: 13.5px; line-height: 1.8; color: #333a4e; }
 .log-line.empty { height: 8px; }
+.log-line.warn { color: #9c6a10; font-weight: 600; }
+.log-line.bad { color: var(--error-text); font-weight: 600; }
+.log-line.good { color: var(--ok); font-weight: 600; }
+
+.running { color: var(--muted); font-size: 13.5px; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 .sql-block {
     background: var(--sql-bg); color: var(--sql-text);
     border-radius: 8px; padding: 10px 14px; margin-top: 10px;
     font-family: "JetBrains Mono", "D2Coding", Consolas, monospace;
-    font-size: 12.5px; line-height: 1.65; overflow-x: auto; white-space: pre;
+    font-size: 12.5px; line-height: 1.65;
+    white-space: pre-wrap; word-break: break-word;
 }
 .sql-label {
     font-size: 11px; font-weight: 700; color: #5a8d6c;
@@ -183,9 +192,11 @@ pre.code-block {
     cursor: pointer; color: #39415e; border: 1px solid transparent;
 }
 .example-chip:hover { border-color: var(--accent); color: var(--accent); }
+.example-chip:focus-visible { outline: 2px solid var(--accent); }
 .example-chip.danger { background: #fdf0f0; color: #a04545; }
 .example-chip.danger:hover { border-color: var(--error-text); }
 
+.table-wrap { overflow-x: auto; }
 .result-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 .result-table th, .result-table td {
     border: 1px solid var(--border); padding: 7px 12px; text-align: left;

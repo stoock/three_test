@@ -15,14 +15,21 @@ document.getElementById('brand').onclick = () => select('intro');
 init();
 
 async function init() {
-    const [scenarios, schema] = await Promise.all([
-        fetch('/api/scenarios').then(r => r.json()),
-        fetch('/api/schema').then(r => r.json()),
-    ]);
-    state.scenarios = scenarios;
-    state.schema = schema;
-    renderNav();
-    select(location.hash ? location.hash.substring(1) : 'intro');
+    content.innerHTML = '<p class="page-summary">⏳ 불러오는 중...</p>';
+    try {
+        const [scenarios, schema] = await Promise.all([
+            fetch('/api/scenarios').then(r => r.json()),
+            fetch('/api/schema').then(r => r.json()),
+        ]);
+        state.scenarios = scenarios;
+        state.schema = schema;
+        renderNav();
+        select(location.hash ? location.hash.substring(1) : 'intro');
+    } catch (e) {
+        content.innerHTML = `<div class="error-block"><div class="error-title">서버에 연결할 수 없습니다</div>
+            <div class="error-chain">${esc(String(e))}</div></div>
+            <p class="notice" style="margin-top:10px">앱이 실행 중인지 확인하세요: <code>./mvnw spring-boot:run</code> 후 새로고침</p>`;
+    }
 }
 
 window.addEventListener('hashchange', () => {
@@ -44,17 +51,25 @@ function renderNav() {
             html += navItem(s.id, esc(s.title));
         }
     }
+    html += '<div class="nav-category">도구</div>';
+    html += '<a class="nav-item" href="/h2-console" target="_blank" rel="noopener">🗄 H2 콘솔 (새 창)</a>';
+
     nav.innerHTML = html;
-    nav.querySelectorAll('.nav-item').forEach(el => {
+    nav.querySelectorAll('.nav-item[data-id]').forEach(el => {
         el.onclick = () => select(el.dataset.id);
+        el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(el.dataset.id); } };
     });
 }
 
 function navItem(id, label) {
-    return `<a class="nav-item" data-id="${id}">${label}</a>`;
+    return `<a class="nav-item" data-id="${id}" tabindex="0">${label}</a>`;
 }
 
 function select(id) {
+    // 존재하지 않는 해시(옛 북마크 등)는 시작 페이지로
+    if (id !== 'intro' && id !== 'scratchpad' && !state.scenarios.some(s => s.id === id)) {
+        id = 'intro';
+    }
     state.current = id;
     location.hash = id;
     nav.querySelectorAll('.nav-item').forEach(el =>
@@ -151,10 +166,10 @@ function renderScenario(id) {
         <p class="page-summary">${esc(s.summary)}</p>
 
         <div class="tabs">
-            <div class="tab active" data-tab="concept">📖 개념 설명</div>
-            <div class="tab" data-tab="tips">💡 실무 팁</div>
-            <div class="tab" data-tab="production">🏭 운영 활용</div>
-            <div class="tab" data-tab="code">💻 실행 코드</div>
+            <div class="tab active" data-tab="concept" tabindex="0">📖 개념 설명</div>
+            <div class="tab" data-tab="tips" tabindex="0">💡 실무 팁</div>
+            <div class="tab" data-tab="production" tabindex="0">🏭 운영 활용</div>
+            <div class="tab" data-tab="code" tabindex="0">💻 실행 코드</div>
         </div>
         <div id="tab-body"></div>
 
@@ -179,11 +194,13 @@ function renderScenario(id) {
     renderTab('concept');
 
     content.querySelectorAll('.tab').forEach(el => {
-        el.onclick = () => {
+        const activate = () => {
             content.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             el.classList.add('active');
             renderTab(el.dataset.tab);
         };
+        el.onclick = activate;
+        el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } };
     });
 
     document.getElementById('run-btn').onclick = () => runScenario(s.id);
@@ -194,7 +211,8 @@ async function runScenario(id) {
     const out = document.getElementById('run-output');
     btn.disabled = true;
     btn.textContent = '실행 중...';
-    out.innerHTML = '';
+    out.innerHTML = `<div class="card running">⏳ 데이터 초기화 후 시나리오를 단계별로 실행하고 있습니다 —
+        락 타임아웃 체험 등 일부 시나리오는 1~2초 걸립니다.</div>`;
     try {
         const res = await fetch(`/api/scenarios/${id}/run`, { method: 'POST' });
         const data = await res.json();
@@ -212,9 +230,11 @@ function renderStep(step) {
     const badge = step.error
         ? '<span class="badge fail">예외 발생</span>'
         : '<span class="badge ok">성공</span>';
-    const logs = step.logs.map(l =>
-        l === '' ? '<div class="log-line empty"></div>'
-                 : `<div class="log-line">${esc(l)}</div>`).join('');
+    const logs = step.logs.map(l => {
+        if (l === '') return '<div class="log-line empty"></div>';
+        const cls = l.startsWith('⚠') ? ' warn' : l.includes('❌') ? ' bad' : l.includes('✅') ? ' good' : '';
+        return `<div class="log-line${cls}">${esc(l)}</div>`;
+    }).join('');
     const sql = step.sql.length
         ? `<div class="sql-label">실행된 SQL (${step.sql.length}건)</div>` +
           step.sql.map(q => `<div class="sql-block">${esc(formatSql(q))}</div>`).join('')
@@ -316,16 +336,21 @@ function renderScratchpad() {
 
     function renderExamples() {
         const list = EXAMPLES[state.padType];
+        const chip = (ex, i) =>
+            `<span class="example-chip ${ex.danger ? 'danger' : ''}" data-i="${i}" tabindex="0">${esc(ex.label)}</span>`;
+        const normal = list.map((ex, i) => ({ ex, i })).filter(x => !x.ex.danger);
+        const danger = list.map((ex, i) => ({ ex, i })).filter(x => x.ex.danger);
         document.getElementById('pad-examples').innerHTML =
-            '<h4>예제 (클릭하면 입력됩니다 — ❌는 예외 체험)</h4>' +
-            list.map((ex, i) =>
-                `<span class="example-chip ${ex.danger ? 'danger' : ''}" data-i="${i}">${esc(ex.label)}</span>`).join('');
+            '<h4>기본 예제 (클릭하면 입력됩니다)</h4>' + normal.map(x => chip(x.ex, x.i)).join('') +
+            '<h4>예외 체험 — 일부러 실패하는 쿼리</h4>' + danger.map(x => chip(x.ex, x.i)).join('');
         document.querySelectorAll('.example-chip').forEach(el => {
-            el.onclick = () => {
+            const apply = () => {
                 textarea.value = list[el.dataset.i].q;
                 state.padQueries[state.padType] = textarea.value;
                 textarea.focus();
             };
+            el.onclick = apply;
+            el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); } };
         });
     }
 
@@ -336,21 +361,36 @@ function renderScratchpad() {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runPad();
     });
     document.getElementById('pad-reset').onclick = async () => {
-        const res = await fetch('/api/scratchpad/reset', { method: 'POST' }).then(r => r.json());
-        document.getElementById('pad-output').innerHTML =
-            `<div class="card"><span class="success-msg">✅ ${esc(res.message)}</span></div>`;
+        const out = document.getElementById('pad-output');
+        try {
+            const res = await fetch('/api/scratchpad/reset', { method: 'POST' }).then(r => r.json());
+            out.innerHTML = `<div class="card"><span class="success-msg">✅ ${esc(res.message)}</span></div>`;
+        } catch (e) {
+            out.innerHTML = `<div class="error-block"><div class="error-title">초기화 요청 실패</div>
+                <div class="error-chain">${esc(String(e))}</div></div>`;
+        }
     };
 }
 
 async function runPad() {
     const query = document.getElementById('pad-query').value;
     const out = document.getElementById('pad-output');
-    out.innerHTML = '<div class="notice">실행 중...</div>';
-    const data = await fetch('/api/scratchpad', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: state.padType, query }),
-    }).then(r => r.json());
+    const btn = document.getElementById('pad-run');
+    btn.disabled = true;
+    out.innerHTML = '<div class="card running">⏳ 실행 중...</div>';
+    let data;
+    try {
+        data = await fetch('/api/scratchpad', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: state.padType, query }),
+        }).then(r => r.json());
+    } catch (e) {
+        out.innerHTML = `<div class="error-block"><div class="error-title">실행 요청 실패 — 서버가 응답하지 않습니다</div>
+            <div class="error-chain">${esc(String(e))}</div></div>`;
+        btn.disabled = false;
+        return;
+    }
 
     let html = '<div class="card">';
     if (data.error) {
@@ -364,11 +404,15 @@ async function runPad() {
         html += `<p class="success-msg">✅ 조회 성공 — ${data.rowCount}행</p>`;
         if (data.rows.length) {
             const colCount = Math.max(...data.rows.map(r => r.length));
-            html += '<table class="result-table"><thead><tr>' +
-                Array.from({ length: colCount }, (_, i) => `<th>col${i + 1}</th>`).join('') +
+            const headers = selectHeaders(query, colCount)
+                || Array.from({ length: colCount }, (_, i) => 'col' + (i + 1));
+            html += '<div class="table-wrap"><table class="result-table"><thead><tr>' +
+                headers.map(h => `<th>${esc(h)}</th>`).join('') +
                 '</tr></thead><tbody>' +
                 data.rows.map(r => '<tr>' + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>').join('') +
-                '</tbody></table>';
+                '</tbody></table></div>';
+        } else {
+            html += '<p class="notice">조건에 맞는 결과가 없습니다.</p>';
         }
         if (data.notice) html += `<p class="notice">${esc(data.notice)}</p>`;
     } else if (data.resultType === 'update') {
@@ -381,6 +425,27 @@ async function runPad() {
     }
     html += '</div>';
     out.innerHTML = html;
+    btn.disabled = false;
+}
+
+/** select 절을 파싱해 결과 테이블 헤더로 사용 (실패하면 null → colN 으로 대체) */
+function selectHeaders(query, colCount) {
+    const m = query.replace(/\s+/g, ' ').match(/^\s*select\s+(?:distinct\s+)?(.*?)\s+from\s/i);
+    if (!m) return null;
+    const parts = [];
+    let depth = 0, cur = '';
+    for (const ch of m[1]) {
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+        else cur += ch;
+    }
+    if (cur.trim()) parts.push(cur.trim());
+    if (parts.length !== colCount) return null;
+    return parts.map(p => {
+        const alias = p.match(/\s+as\s+([\w가-힣]+)$/i);
+        return alias ? alias[1] : p;
+    });
 }
 
 /* ---------------- 유틸 ---------------- */
@@ -390,12 +455,13 @@ function esc(s) {
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** 한 줄짜리 SQL을 읽기 좋게 줄바꿈 */
+/** 한 줄짜리 SQL을 절(clause) 단위로 줄바꿈 — 컬럼 목록은 한 줄에 두고 자연 줄바꿈에 맡긴다 */
 function formatSql(sql) {
     return sql
-        .replace(/\s+(from|where|left join|inner join|join fetch|join|group by|order by|having|values|set|offset|fetch first|limit|for update)\s+/gi,
+        .replace(/,(?=\S)/g, ', ')
+        .replace(/\s+(from|where|left join|inner join|cross join|join|group by|order by|having|values|set|offset|fetch first|limit|for update)\s+/gi,
             (m, kw) => '\n' + kw.toLowerCase() + ' ')
-        .replace(/,\s*(?![^(]*\))/g, ',\n    ');
+        .replace(/\s+(and|or)\s+/gi, (m, kw) => '\n  ' + kw.toLowerCase() + ' ');
 }
 
 /** 시나리오 문서용 미니 마크다운 렌더러 (문단, 목록, 번호목록, **굵게**, `코드`) */

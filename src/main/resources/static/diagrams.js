@@ -219,7 +219,7 @@ const DIAGRAMS = {
             group('영속성 컨텍스트', flow(box('member', 'age = <b>29</b> <span class="dim">(옛값)</span>', 'mini warn'))),
             `<div class="d-vert">
                 ${box('executeUpdate()', '벌크 UPDATE', 'mini')}
-                <div class="d-arrow"><span class="line">⤵ 우회 (1차 캐시 안 거침)</span></div>
+                ${arrow('우회 — 1차 캐시를 안 거침', '⤵')}
             </div>`,
             box('DB', 'age = <b>39</b>', 'db')
         ) +
