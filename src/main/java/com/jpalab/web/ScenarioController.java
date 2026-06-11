@@ -3,9 +3,11 @@ package com.jpalab.web;
 import com.jpalab.scenario.Scenario;
 import com.jpalab.scenario.ScenarioDoc;
 import com.jpalab.service.DataResetService;
+import com.jpalab.service.LabDatabaseManager;
 import com.jpalab.support.ScenarioContext;
 import com.jpalab.support.StepResult;
 import jakarta.persistence.EntityManagerFactory;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Comparator;
@@ -22,10 +24,10 @@ public class ScenarioController {
             "영속성 컨텍스트", "연관관계 매핑", "지연 로딩과 성능", "동시성과 락", "JPQL과 벌크 연산");
 
     private final Map<String, Scenario> scenarios = new LinkedHashMap<>();
-    private final EntityManagerFactory emf;
+    private final LabDatabaseManager labDatabaseManager;
     private final DataResetService dataResetService;
 
-    public ScenarioController(List<Scenario> scenarioList, EntityManagerFactory emf,
+    public ScenarioController(List<Scenario> scenarioList, LabDatabaseManager labDatabaseManager,
                               DataResetService dataResetService) {
         scenarioList.stream()
                 .sorted(Comparator.comparing((Scenario s) -> {
@@ -34,7 +36,7 @@ public class ScenarioController {
                         })
                         .thenComparing(s -> s.doc().order()))
                 .forEach(s -> scenarios.put(s.doc().id(), s));
-        this.emf = emf;
+        this.labDatabaseManager = labDatabaseManager;
         this.dataResetService = dataResetService;
     }
 
@@ -44,12 +46,14 @@ public class ScenarioController {
     }
 
     @PostMapping("/{id}/run")
-    public Map<String, Object> run(@PathVariable String id) {
+    public Map<String, Object> run(@PathVariable String id, HttpServletRequest request) {
         Scenario scenario = scenarios.get(id);
         if (scenario == null) {
             throw new IllegalArgumentException("존재하지 않는 시나리오: " + id);
         }
-        dataResetService.reset(); // 항상 동일한 데이터 상태에서 시작
+        // 브라우저 세션 전용 DB에서 실행 — 다른 접속자와 데이터가 섞이지 않는다
+        EntityManagerFactory emf = labDatabaseManager.emfFor(request.getSession(true).getId());
+        dataResetService.reset(emf); // 항상 동일한 데이터 상태에서 시작
         try (ScenarioContext ctx = new ScenarioContext(emf)) {
             scenario.run(ctx);
             List<StepResult> steps = ctx.steps();

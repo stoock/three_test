@@ -119,7 +119,8 @@ function renderIntro() {
             </ol>
             <p>⚠ 표시가 있는 시나리오는 <strong>일부러 예외와 잘못된 방식을 발생시키는</strong> 체험형 시나리오입니다.
             마지막에는 <strong>🧪 스크래치 패드</strong>에서 JPQL과 SQL을 자유롭게 실험해 보세요.
-            시나리오는 실행할 때마다 데이터가 초기 상태로 리셋되므로 부담 없이 눌러봐도 됩니다.</p>
+            시나리오는 실행할 때마다 데이터가 초기 상태로 리셋되므로 부담 없이 눌러봐도 됩니다.
+            데이터는 <strong>브라우저 세션마다 독립된 DB</strong>에 저장되어 여러 명이 동시에 사용해도 서로 섞이지 않습니다.</p>
         </div>
 
         <div class="card">
@@ -310,8 +311,16 @@ function renderScratchpad() {
                        placeholder="🔎 엔티티/필드/컬럼 검색" autocomplete="off">
                 <div class="schema-hint" id="schema-hint"></div>
                 <div id="schema-list"></div>
+                <div class="session-db" id="session-db"></div>
             </div>
         </div>`;
+
+    // 이 브라우저 세션 전용 DB 안내 (H2 콘솔 접속용)
+    fetch('/api/scratchpad/info').then(r => r.json()).then(info => {
+        const el = document.getElementById('session-db');
+        if (el) el.innerHTML = `🔒 이 브라우저 세션 전용 DB라서 다른 접속자와 데이터가 섞이지 않습니다.<br>
+            H2 콘솔 접속 URL: <code>${esc(info.jdbcUrl.split(';')[0])}</code>`;
+    }).catch(() => {});
 
     const textarea = document.getElementById('pad-query');
     textarea.value = state.padQueries[state.padType]; // 페이지를 떠났다 와도 유지

@@ -12,7 +12,29 @@
 브라우저에서 **http://localhost:8080** 접속.
 
 - DB는 인메모리 H2라서 별도 설치가 필요 없고, 재시작하면 초기화됩니다.
-- H2 콘솔: http://localhost:8080/h2-console (JDBC URL: `jdbc:h2:mem:jpalab`, 사용자: `sa`)
+- **브라우저 세션마다 독립된 DB**가 생성되어 여러 명이 동시에 사용해도 데이터가 섞이지 않습니다.
+  (30분 미사용 시 자동 정리, 동시 세션 50개 상한)
+- H2 콘솔: http://localhost:8080/h2-console — 내 세션의 JDBC URL은 스크래치 패드
+  우측 패널 하단에 표시됩니다 (사용자: `sa`, 비밀번호 없음)
+
+## 배포 (서버 관리 최소화)
+
+외부 DB가 없는 무상태 단일 컨테이너라서 scale-to-zero 플랫폼에 올리면 관리할 것이 거의 없습니다.
+
+```bash
+# Google Cloud Run — 명령 한 줄 (소스에서 빌드·배포, 미사용 시 0으로 축소)
+gcloud run deploy jpa-lab --source . --region asia-northeast3 \
+  --allow-unauthenticated --max-instances 1
+
+# 또는 Fly.io
+fly launch --now
+
+# 또는 아무 곳에서나 Docker 로
+docker build -t jpa-lab . && docker run -p 8080:8080 jpa-lab
+```
+
+세션 격리는 인스턴스 내부 메모리 기준이므로 `--max-instances 1` 을 권장합니다
+(학습 도구 트래픽에는 충분하며, 인스턴스가 재시작되면 모든 세션 데이터가 초기화됩니다 — 이 도구에서는 정상 동작).
 
 ## 무엇을 배우나
 

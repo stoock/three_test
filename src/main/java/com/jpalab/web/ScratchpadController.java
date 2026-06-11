@@ -1,12 +1,14 @@
 package com.jpalab.web;
 
 import com.jpalab.service.DataResetService;
+import com.jpalab.service.LabDatabaseManager;
 import com.jpalab.support.SqlCaptureInspector;
 import com.jpalab.support.StepResult;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.EntityTransaction;
 import jakarta.persistence.Query;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -18,6 +20,7 @@ import java.util.Map;
 /**
  * 스크래치 패드: JPQL / 네이티브 SQL 을 직접 입력해 실행하고
  * 결과·실행된 SQL·예외를 그대로 확인할 수 있다.
+ * 모든 작업은 브라우저 세션 전용 DB에서 수행된다.
  */
 @RestController
 @RequestMapping("/api/scratchpad")
@@ -25,19 +28,29 @@ public class ScratchpadController {
 
     private static final int MAX_ROWS = 200;
 
-    private final EntityManagerFactory emf;
+    private final LabDatabaseManager labDatabaseManager;
     private final DataResetService dataResetService;
 
-    public ScratchpadController(EntityManagerFactory emf, DataResetService dataResetService) {
-        this.emf = emf;
+    public ScratchpadController(LabDatabaseManager labDatabaseManager, DataResetService dataResetService) {
+        this.labDatabaseManager = labDatabaseManager;
         this.dataResetService = dataResetService;
     }
 
     public record ScratchpadRequest(String type, String query) {
     }
 
+    private String sessionId(HttpServletRequest request) {
+        return request.getSession(true).getId();
+    }
+
+    /** 세션 전용 DB 정보 (H2 콘솔 접속 안내용) */
+    @GetMapping("/info")
+    public Map<String, Object> info(HttpServletRequest request) {
+        return Map.of("jdbcUrl", labDatabaseManager.jdbcUrlFor(sessionId(request)));
+    }
+
     @PostMapping
-    public Map<String, Object> execute(@RequestBody ScratchpadRequest request) {
+    public Map<String, Object> execute(@RequestBody ScratchpadRequest request, HttpServletRequest httpRequest) {
         String query = request.query() == null ? "" : request.query().trim();
         if (query.isEmpty()) {
             return Map.of("error", Map.of("exceptionType", "EmptyQuery", "message", "쿼리를 입력하세요.",
@@ -46,6 +59,7 @@ public class ScratchpadController {
         boolean nativeSql = "sql".equalsIgnoreCase(request.type());
 
         Map<String, Object> response = new LinkedHashMap<>();
+        EntityManagerFactory emf = labDatabaseManager.emfFor(sessionId(httpRequest));
         EntityManager em = emf.createEntityManager();
         EntityTransaction tx = em.getTransaction();
         SqlCaptureInspector.start();
@@ -80,8 +94,8 @@ public class ScratchpadController {
     }
 
     @PostMapping("/reset")
-    public Map<String, Object> reset() {
-        dataResetService.reset();
+    public Map<String, Object> reset(HttpServletRequest request) {
+        dataResetService.reset(labDatabaseManager.emfFor(sessionId(request)));
         return Map.of("message", "데이터가 초기 상태로 복원되었습니다.");
     }
 

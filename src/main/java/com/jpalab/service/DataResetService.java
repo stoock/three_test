@@ -8,18 +8,12 @@ import org.springframework.stereotype.Service;
 
 /**
  * 시나리오를 항상 같은 상태에서 시작할 수 있도록 데이터를 초기화한다.
- * 시나리오 실행 전과 스크래치 패드의 "데이터 초기화" 버튼에서 호출된다.
+ * 세션 DB 최초 생성, 시나리오 실행 전, 스크래치 패드의 "데이터 초기화" 버튼에서 호출된다.
  */
 @Service
 public class DataResetService {
 
-    private final EntityManagerFactory emf;
-
-    public DataResetService(EntityManagerFactory emf) {
-        this.emf = emf;
-    }
-
-    public void reset() {
+    public void reset(EntityManagerFactory emf) {
         EntityManager em = emf.createEntityManager();
         EntityTransaction tx = em.getTransaction();
         tx.begin();

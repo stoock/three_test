@@ -275,6 +275,11 @@ pre.code-block {
     border-radius: 5px; padding: 1.5px 6px; font-size: 10px;
 }
 .se-rel { color: #c47f17; font-weight: 700; }
+.session-db {
+    margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
+    font-size: 11px; color: var(--muted); line-height: 1.7;
+}
+.session-db code { font-size: 10px; background: #eef0f8; border-radius: 4px; padding: 1px 5px; word-break: break-all; }
 .schema-entity { margin-bottom: 14px; }
 .schema-entity-name { font-weight: 800; color: var(--accent-dark); margin-bottom: 4px; font-size: 13.5px; }
 .schema-attr { display: flex; justify-content: space-between; padding: 2.5px 0 2.5px 10px; color: #444b61; }
