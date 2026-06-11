@@ -16,6 +16,13 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # 학습 페이지가 갱신될 때 브라우저가 옛 JS/CSS를 계속 쓰지 않도록 매번 재검증
+          no-cache: true
+          must-revalidate: true
 
 server:
   port: 8080
