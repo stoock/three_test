@@ -1,76 +1,299 @@
-// Canvas2D isometric renderer for "불멸의 연대기".
-//
-// Implements the art-direction spec: luminance-multiply face shading, edge
-// lights, ambient occlusion, directional drop shadows, layered water, era
-// silhouettes with an emissive (bloom) layer, atmospheric perspective, fog,
-// tone-mapping, vignette, grain and a chaos-driven colour grade.
-//
-// The renderer is pure drawing logic — it never touches the DOM directly, it
-// only draws into a CanvasRenderingContext2D that the caller owns. This keeps
-// it usable both for the live <canvas> view and for offscreen snapshot export.
-
 import type { Character, Era } from "./types";
 import { getEra, eraProgress } from "./eras";
-import { fbm, hash2, makeRng } from "./chaos";
+import { fbm, makeRng } from "./chaos";
 
-export const TILE_W = 64;
-export const TILE_H = 32;
-const LAYER = 9; // vertical px per elevation step
-const MAX_LAYERS = 5;
-const BASE_DEPTH = 7;
+// ============================================================================
+// Voxel / Minecraft-style isometric renderer.
+// The world is built from textured cubes. Pixel-art block textures (16×16) are
+// generated once and painted onto isometric cube faces via affine transforms,
+// giving each material real surface detail and each era a distinct silhouette.
+// ============================================================================
 
-// ---------------------------------------------------------------------------
-// colour helpers (linear-ish RGB triplets)
-// ---------------------------------------------------------------------------
-type RGB = [number, number, number];
+export const TILE_W = 32;
+export const TILE_H = 16;
+const HW = TILE_W / 2; // 16
+const HH = TILE_H / 2; // 8
+const CUBE_H = 16; // vertical height of one block (screen px, S=1)
+const MAX_LAYERS = 4;
+const BASE_DEPTH = 12; // thickness of the island slab below sea level
+const TS = 16; // texture size in px
 
-function hexToRgb(hex: string): RGB {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+type AnyCanvas = HTMLCanvasElement;
+type Ctx = CanvasRenderingContext2D;
+
+function makeCanvas(w: number, h: number): { canvas: AnyCanvas; ctx: Ctx } | null {
+  let canvas: AnyCanvas | OffscreenCanvas;
+  if (typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    canvas = c;
+  } else if (typeof OffscreenCanvas !== "undefined") {
+    canvas = new OffscreenCanvas(w, h);
+  } else {
+    return null;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  return { canvas: canvas as AnyCanvas, ctx: ctx as unknown as Ctx };
 }
-function rgbStr(c: RGB, a = 1): string {
-  const r = clamp255(c[0]);
-  const g = clamp255(c[1]);
-  const b = clamp255(c[2]);
-  return a >= 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${a})`;
+
+export function canRenderCanvas(): boolean {
+  return typeof document !== "undefined" || typeof OffscreenCanvas !== "undefined";
 }
-function clamp255(v: number): number {
+
+// ---------- colour ----------
+function clampByte(v: number): number {
   return Math.max(0, Math.min(255, Math.round(v)));
 }
-function mixRgb(a: RGB, b: RGB, t: number): RGB {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+function hexRgb(h: string): [number, number, number] {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
-function scaleRgb(c: RGB, k: number): RGB {
-  return [c[0] * k, c[1] * k, c[2] * k];
+function rgbHex(r: number, g: number, b: number): string {
+  return "#" + ((clampByte(r) << 16) | (clampByte(g) << 8) | clampByte(b)).toString(16).padStart(6, "0");
 }
-function hexMix(a: string, b: string, t: number): string {
-  return rgbStr(mixRgb(hexToRgb(a), hexToRgb(b), t));
+function mul(h: string, f: number): string {
+  const [r, g, b] = hexRgb(h);
+  return rgbHex(r * f, g * f, b * f);
+}
+function mix(a: string, b: string, t: number): string {
+  const A = hexRgb(a);
+  const B = hexRgb(b);
+  return rgbHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t);
+}
+function hexA(hex: string, a: number): string {
+  const [r, g, b] = hexRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
 }
 
-// ---------------------------------------------------------------------------
-// lighting constants (spec)
-// ---------------------------------------------------------------------------
-const FACE_TOP = 1.0;
-const FACE_LEFT = 0.78; // light side
-const FACE_RIGHT = 0.55; // shade side
+// ============================================================================
+// Pixel-art texture generation (cached)
+// ============================================================================
+const baseTexCache = new Map<string, AnyCanvas>();
+const shadeTexCache = new Map<string, AnyCanvas>();
 
-function litFace(base: RGB, faceFactor: number, ambient: number): RGB {
-  // faceColor = baseColor * (ambient + (1-ambient)*faceFactor)
-  return scaleRgb(base, ambient + (1 - ambient) * faceFactor);
+function px(ctx: Ctx, x: number, y: number, color: string) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, 1, 1);
 }
 
-// ---------------------------------------------------------------------------
-// terrain
-// ---------------------------------------------------------------------------
+function buildBaseTex(name: string): AnyCanvas {
+  const made = makeCanvas(TS, TS);
+  if (!made) throw new Error("no canvas");
+  const { canvas, ctx } = made;
+  const rng = makeRng(hashStr(name));
+  const fill = (c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(0, 0, TS, TS);
+  };
+
+  switch (name) {
+    case "grass": {
+      const base = "#6fae3d";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(base, 0.85 + rng() * 0.3));
+      for (let i = 0; i < 22; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(base, 0.7));
+      for (let i = 0; i < 10; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, "#9ed46a");
+      break;
+    }
+    case "dirt_grass": {
+      const dirt = "#7a5536";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(dirt, 0.8 + rng() * 0.4));
+      for (let i = 0; i < 14; i++) px(ctx, (rng() * TS) | 0, 3 + ((rng() * (TS - 3)) | 0), mul(dirt, 0.6));
+      const g = "#6fae3d";
+      for (let x = 0; x < TS; x++) {
+        px(ctx, x, 0, mul(g, 0.95 + rng() * 0.1));
+        px(ctx, x, 1, mul(g, 0.85 + rng() * 0.15));
+        if (rng() > 0.5) px(ctx, x, 2, mul(g, 0.8));
+      }
+      break;
+    }
+    case "dirt": {
+      const dirt = "#6f4d30";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(dirt, 0.78 + rng() * 0.4));
+      for (let i = 0; i < 16; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(dirt, 0.6));
+      break;
+    }
+    case "sand": {
+      const s = "#dcc88c";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(s, 0.9 + rng() * 0.18));
+      for (let i = 0; i < 12; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(s, 0.82));
+      break;
+    }
+    case "stone":
+    case "stone_side": {
+      const s = "#8f877b";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(s, 0.85 + rng() * 0.28));
+      for (let i = 0; i < 5; i++) {
+        let cx = (rng() * TS) | 0;
+        let cy = (rng() * TS) | 0;
+        for (let k = 0; k < 4; k++) {
+          px(ctx, cx, cy, mul(s, 0.62));
+          cx = Math.min(TS - 1, Math.max(0, cx + ((rng() * 3) | 0) - 1));
+          cy = Math.min(TS - 1, cy + 1);
+        }
+      }
+      break;
+    }
+    case "snow": {
+      const s = "#eef4f8";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(s, 0.93 + rng() * 0.07));
+      for (let i = 0; i < 6; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, "#cfe0ee");
+      for (let i = 0; i < 4; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, "#ffffff");
+      break;
+    }
+    case "water":
+    case "water_deep": {
+      const b = name === "water_deep" ? "#1f4f86" : "#2f74b4";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(b, 0.9 + rng() * 0.16));
+      for (let y = 1; y < TS; y += 4) for (let x = 0; x < TS; x++) if ((x + y) % 3 === 0) px(ctx, x, y, mul(b, 1.25));
+      break;
+    }
+    case "planks": {
+      const w = "#9c6b3c";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(w, 0.86 + rng() * 0.26));
+      for (let x = 0; x < TS; x += 5) for (let y = 0; y < TS; y++) px(ctx, x, y, mul(w, 0.62));
+      for (let y = 0; y < TS; y += 6) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(w, 0.72));
+      break;
+    }
+    case "thatch": {
+      const t = "#caa242";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(t, 0.85 + rng() * 0.3));
+      for (let y = 0; y < TS; y += 3) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(t, 0.68));
+      break;
+    }
+    case "tile_roof": {
+      const t = "#a8432f";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(t, 0.85 + rng() * 0.25));
+      for (let y = 0; y < TS; y += 4) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(t, 0.66));
+      break;
+    }
+    case "brick":
+    case "stonebrick": {
+      const b = name === "brick" ? "#9c4a38" : "#7f7a70";
+      const mortar = name === "brick" ? "#c8b8a0" : "#a8a298";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(b, 0.86 + rng() * 0.22));
+      for (let y = 0; y < TS; y += 4) {
+        for (let x = 0; x < TS; x++) px(ctx, x, y, mortar);
+        const off = (y / 4) % 2 === 0 ? 0 : 4;
+        for (let x = off; x < TS; x += 8) for (let k = 0; k < 4; k++) px(ctx, x, Math.min(TS - 1, y + k), mortar);
+      }
+      break;
+    }
+    case "plaster": {
+      const p = "#ddcba2";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(p, 0.93 + rng() * 0.12));
+      break;
+    }
+    case "metal": {
+      const m = "#aab2be";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(m, 0.85 + rng() * 0.24));
+      for (let x = 0; x < TS; x += 5) for (let y = 0; y < TS; y++) px(ctx, x, y, mul(m, 0.7));
+      for (let y = 2; y < TS; y += 6) for (let x = 2; x < TS; x += 6) px(ctx, x, y, mul(m, 1.2));
+      break;
+    }
+    case "glass":
+    case "glass_neon": {
+      const neon = name === "glass_neon";
+      const frame = neon ? "#241a40" : "#33405c";
+      const glass = neon ? "#3a2c66" : "#46577a";
+      fill(frame);
+      for (let cy = 0; cy < TS; cy += 5)
+        for (let cx = 0; cx < TS; cx += 5)
+          for (let y = 1; y < 4; y++) for (let x = 1; x < 4; x++) px(ctx, cx + x, cy + y, mul(glass, 0.9 + rng() * 0.2));
+      break;
+    }
+    case "leaf": {
+      const g = "#357a32";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(g, 0.8 + rng() * 0.4));
+      for (let i = 0; i < 16; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(g, 0.65));
+      for (let i = 0; i < 8; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, "#5aa84a");
+      break;
+    }
+    case "log": {
+      const w = "#6e4a2a";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(w, 0.85 + rng() * 0.22));
+      for (let x = 2; x < TS; x += 5) for (let y = 0; y < TS; y++) px(ctx, x, y, mul(w, 0.65));
+      break;
+    }
+    default:
+      fill("#888888");
+  }
+  return canvas;
+}
+
+function getBaseTex(name: string): AnyCanvas {
+  let t = baseTexCache.get(name);
+  if (!t) {
+    t = buildBaseTex(name);
+    baseTexCache.set(name, t);
+  }
+  return t;
+}
+
+function getTex(name: string, factor: number): AnyCanvas {
+  const key = `${name}@${factor.toFixed(2)}`;
+  const hit = shadeTexCache.get(key);
+  if (hit) return hit;
+  const base = getBaseTex(name);
+  if (factor === 1) {
+    shadeTexCache.set(key, base);
+    return base;
+  }
+  const made = makeCanvas(TS, TS)!;
+  made.ctx.drawImage(base, 0, 0);
+  made.ctx.globalCompositeOperation = "multiply";
+  made.ctx.fillStyle = rgbHex(factor * 255, factor * 255, factor * 255);
+  made.ctx.fillRect(0, 0, TS, TS);
+  made.ctx.globalCompositeOperation = "source-over";
+  shadeTexCache.set(key, made.canvas);
+  return made.canvas;
+}
+
+// face brightness factors
+const F_TOP = 1.0;
+const F_LEFT = 0.8;
+const F_RIGHT = 0.6;
+
+// ============================================================================
+// scene data
+// ============================================================================
 type Terrain = "water" | "sand" | "grass" | "forest" | "rock" | "snow";
-
-interface Tile {
+interface TileD {
   col: number;
   row: number;
-  e: number;
   terrain: Terrain;
   layers: number;
-  base: RGB;
+}
+interface BuildingD {
+  col: number;
+  row: number;
+  floors: number;
+  seed: number;
+}
+interface SceneData {
+  era: Era;
+  night: boolean;
+  base: AnyCanvas;
+  glow: AnyCanvas;
+  W: number;
+  H: number;
+  S: number;
+  water: { x: number; y: number }[];
+  clouds: { x: number; y: number; s: number }[];
+  stars: { x: number; y: number; r: number; p: number }[];
+  particles: { x: number; y: number; vx: number; vy: number; c: string; r: number }[];
+  charX: number;
+  charY: number;
+  charScale: number;
 }
 
 function classify(e: number): Terrain {
@@ -82,1120 +305,666 @@ function classify(e: number): Terrain {
   return "snow";
 }
 
-function terrainColor(t: Terrain, era: Era, jitter: number): RGB {
-  const p = era.palette;
-  const future = era.index >= 8;
-  const j = (jitter - 0.5) * 0.12; // ±6% lightness jitter
-  let c: RGB;
-  switch (t) {
-    case "water":
-      c = hexToRgb("#1c4a78"); // deep water (shading handled separately)
-      break;
-    case "sand":
-      c = hexToRgb("#d8c48c");
-      break;
-    case "grass":
-      c = hexToRgb(jitter > 0.5 ? p.ground : p.ground2);
-      break;
-    case "forest":
-      c = mixRgb(hexToRgb(p.ground2), hexToRgb("#274d27"), 0.55);
-      break;
-    case "rock":
-      c = future ? mixRgb(hexToRgb("#5a5570"), hexToRgb(p.accent), 0.15) : hexToRgb("#8d8478");
-      break;
-    case "snow":
-      c = future ? mixRgb(hexToRgb("#cfd6ff"), hexToRgb(p.accent), 0.2) : hexToRgb("#e9eef2");
-      break;
-  }
-  return scaleRgb(c, 1 + j);
-}
-
-function buildTiles(character: Character, era: Era): Tile[] {
-  const N = character.territory;
-  const seed = character.seed;
-  const tiles: Tile[] = [];
+function buildTiles(c: Character): TileD[] {
+  const N = c.territory;
   const c0 = (N - 1) / 2;
   const maxD = Math.hypot(c0, c0) || 1;
+  const tiles: TileD[] = [];
   for (let row = 0; row < N; row++) {
     for (let col = 0; col < N; col++) {
-      let e = fbm(col * 0.36 + 1.7, row * 0.36 + 4.3, seed, 4);
+      let e = fbm(col * 0.36 + 1.7, row * 0.36 + 4.3, c.seed, 4);
       const d = Math.hypot(col - c0, row - c0) / maxD;
       e = e * (1.18 - d * 0.6) - d * 0.12;
       e = Math.max(0, Math.min(1, e));
       const terrain = classify(e);
-      const jitter = hash2(col, row, seed + 99);
-      const layers =
-        terrain === "water" ? 0 : Math.max(1, Math.round(((e - 0.3) / 0.7) * MAX_LAYERS));
-      tiles.push({ col, row, e, terrain, layers, base: terrainColor(terrain, era, jitter) });
+      const layers = terrain === "water" ? 0 : Math.max(1, Math.round(((e - 0.3) / 0.7) * MAX_LAYERS));
+      tiles.push({ col, row, terrain, layers });
     }
   }
   return tiles;
 }
 
-function groundPos(col: number, row: number): { x: number; y: number } {
-  return { x: (col - row) * (TILE_W / 2), y: (col + row) * (TILE_H / 2) };
-}
-
-// ---------------------------------------------------------------------------
-// scene mood derived from era + chaos
-// ---------------------------------------------------------------------------
-interface Mood {
-  night: boolean;
-  ambient: number;
-  skyTop: RGB;
-  skyMid: RGB;
-  skyHorizon: RGB;
-  bloomThreshold: number;
-  bloomStrength: number;
-  vignette: number;
-  fog: number;
-  // chaos grade
-  desat: number; // 0..1 toward grey
-  cold: RGB | null;
-  gold: RGB | null;
-  goldAmt: number;
-  grade: RGB; // multiplicative tint
-}
-
-function eraSkies(era: Era): { top: RGB; mid: RGB; horizon: RGB; night: boolean } {
-  const idx = era.index;
-  const sky = hexToRgb(era.palette.sky);
-  if (idx >= 8) {
-    // space / ultra-future: deep blue night
-    const top = mixRgb(sky, [8, 6, 24], 0.55);
-    const mid = sky;
-    const horizon = mixRgb(sky, hexToRgb(era.palette.accent), 0.18);
-    return { top, mid, horizon, night: true };
-  }
-  if (idx === 5) {
-    // industrial: sepia / smog
-    const top = mixRgb(sky, [120, 96, 70], 0.4);
-    const mid = sky;
-    const horizon = mixRgb(sky, [150, 120, 86], 0.5);
-    return { top, mid, horizon, night: false };
-  }
-  if (idx === 3) {
-    // medieval: cold dawn
-    const top = mixRgb(sky, [120, 140, 170], 0.45);
-    const mid = sky;
-    const horizon = mixRgb(sky, [210, 180, 160], 0.45);
-    return { top, mid, horizon, night: false };
-  }
-  // default warm-ish day
-  const top = scaleRgb(sky, 1.12);
-  const mid = sky;
-  const horizon = scaleRgb(sky, 0.82);
-  return { top, mid, horizon, night: false };
-}
-
-function buildMood(character: Character, era: Era): Mood {
-  const s = eraSkies(era);
-  const night = s.night;
-  let ambient = night ? 0.3 : 0.42;
-  let vignette = night ? 0.45 : 0.35;
-  let fog = night ? 0.18 : 0.1;
-  const bloomThreshold = 0.75;
-  let bloomStrength = night ? 0.9 : 0.5;
-
-  // chaos integration
-  const chaos = character.chaos;
-  let desat = 0;
-  let cold: RGB | null = null;
-  let gold: RGB | null = null;
-  let goldAmt = 0;
-  let grade: RGB = [1, 1, 1];
-
-  if (chaos < 0.4) {
-    const k = (0.4 - chaos) / 0.4; // 0..1
-    desat = 0.35 * k;
-    cold = [120, 150, 210];
-    fog += 0.12 * k;
-    vignette += 0.18 * k;
-    ambient -= 0.05 * k;
-    grade = [1 - 0.06 * k, 1 - 0.03 * k, 1 + 0.04 * k];
-  } else if (chaos > 0.6) {
-    const k = (chaos - 0.6) / 0.4; // 0..1
-    gold = [255, 205, 120];
-    goldAmt = 0.28 * k;
-    bloomStrength += 0.4 * k;
-    grade = [1 + 0.1 * k, 1 + 0.05 * k, 1 - 0.04 * k];
-  }
-
-  return {
-    night,
-    ambient,
-    skyTop: s.top,
-    skyMid: s.mid,
-    skyHorizon: s.horizon,
-    bloomThreshold,
-    bloomStrength,
-    vignette,
-    fog,
-    desat,
-    cold,
-    gold,
-    goldAmt,
-    grade,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// drawing primitives
-// ---------------------------------------------------------------------------
-const SUN = { x: -0.5, y: -1.0, z: -0.7 }; // sunDir
-
-function diamondPath(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - TILE_H / 2);
-  ctx.lineTo(cx + TILE_W / 2, cy);
-  ctx.lineTo(cx, cy + TILE_H / 2);
-  ctx.lineTo(cx - TILE_W / 2, cy);
-  ctx.closePath();
-}
-
-interface DrawCtx {
-  ctx: CanvasRenderingContext2D;
-  emis: CanvasRenderingContext2D; // emissive/bloom layer
-  mood: Mood;
-  era: Era;
-  time: number;
-  N: number;
-}
-
-function depthFog(base: RGB, depth: number, mood: Mood): RGB {
-  // atmospheric perspective: mix toward sky horizon with depth
-  const c = mixRgb(base, mood.skyHorizon, depth * 0.18);
-  // chaos colour grade
-  let out: RGB = [c[0] * mood.grade[0], c[1] * mood.grade[1], c[2] * mood.grade[2]];
-  if (mood.desat > 0) {
-    const lum = out[0] * 0.299 + out[1] * 0.587 + out[2] * 0.114;
-    out = mixRgb(out, [lum, lum, lum], mood.desat);
-    if (mood.cold) out = mixRgb(out, mood.cold, mood.desat * 0.25);
-  }
-  if (mood.gold) out = mixRgb(out, mood.gold, mood.goldAmt * 0.4);
-  return out;
-}
-
-function drawTileColumn(d: DrawCtx, tile: Tile, cx: number, sy: number, neighbours: NeighbourInfo) {
-  const { ctx, mood, N } = d;
-  const depth = (tile.col + tile.row) / (2 * (N - 1 || 1));
-  const base = depthFog(tile.base, depth, mood);
-
-  const top = sy - tile.layers * LAYER;
-  const colDepth = tile.layers * LAYER + BASE_DEPTH;
-
-  // --- side faces (luminance multiply) ---
-  const leftC = litFace(base, FACE_LEFT, mood.ambient);
-  const rightC = litFace(base, FACE_RIGHT, mood.ambient);
-
-  // left face
-  ctx.fillStyle = rgbStr(leftC);
-  ctx.beginPath();
-  ctx.moveTo(cx - TILE_W / 2, top);
-  ctx.lineTo(cx, top + TILE_H / 2);
-  ctx.lineTo(cx, top + TILE_H / 2 + colDepth);
-  ctx.lineTo(cx - TILE_W / 2, top + colDepth);
-  ctx.closePath();
-  ctx.fill();
-  // stratum lines on tall cliffs
-  if (tile.layers >= 3 && (tile.terrain === "rock" || tile.terrain === "snow")) {
-    ctx.strokeStyle = rgbStr(scaleRgb(leftC, 0.7), 0.5);
-    ctx.lineWidth = 1;
-    for (let l = 1; l < tile.layers; l++) {
-      const yy = top + TILE_H / 4 + (l / tile.layers) * colDepth;
-      ctx.beginPath();
-      ctx.moveTo(cx - TILE_W / 2, yy);
-      ctx.lineTo(cx, yy + TILE_H / 2);
-      ctx.stroke();
-    }
-  }
-
-  // right face
-  ctx.fillStyle = rgbStr(rightC);
-  ctx.beginPath();
-  ctx.moveTo(cx + TILE_W / 2, top);
-  ctx.lineTo(cx, top + TILE_H / 2);
-  ctx.lineTo(cx, top + TILE_H / 2 + colDepth);
-  ctx.lineTo(cx + TILE_W / 2, top + colDepth);
-  ctx.closePath();
-  ctx.fill();
-
-  // --- top diamond ---
-  if (tile.terrain === "water") {
-    drawWaterTop(d, tile, cx, top, base, depth);
-  } else {
-    const topC = litFace(base, FACE_TOP, mood.ambient);
-    ctx.fillStyle = rgbStr(topC);
-    diamondPath(ctx, cx, top);
-    ctx.fill();
-
-    // edge light: top-left two edges +18% (1px), bottom-right two edges -22%
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = rgbStr(scaleRgb(topC, 1.18), 0.9);
-    ctx.beginPath();
-    ctx.moveTo(cx - TILE_W / 2, top);
-    ctx.lineTo(cx, top - TILE_H / 2);
-    ctx.lineTo(cx + TILE_W / 2, top);
-    ctx.stroke();
-    ctx.strokeStyle = rgbStr(scaleRgb(topC, 0.78), 0.9);
-    ctx.beginPath();
-    ctx.moveTo(cx + TILE_W / 2, top);
-    ctx.lineTo(cx, top + TILE_H / 2);
-    ctx.lineTo(cx - TILE_W / 2, top);
-    ctx.stroke();
-
-    drawTileDetail(d, tile, cx, top, topC);
-  }
-
-  // --- AO toward higher neighbours (top edges) ---
-  drawAO(d, tile, cx, top, neighbours);
-}
-
-interface NeighbourInfo {
-  // is the neighbour on that edge higher than this tile?
-  nw: boolean; // up-left
-  ne: boolean; // up-right
-}
-
-function drawAO(d: DrawCtx, _tile: Tile, cx: number, top: number, n: NeighbourInfo) {
-  const { ctx } = d;
-  if (n.ne) {
-    // higher tile up-right → shade NE edge (cx..cx+W/2 along top-right)
-    const grad = ctx.createLinearGradient(cx, top - TILE_H / 2, cx + TILE_W / 4, top - TILE_H / 4);
-    grad.addColorStop(0, "rgba(0,0,0,0.25)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(cx, top - TILE_H / 2);
-    ctx.lineTo(cx + TILE_W / 2, top);
-    ctx.lineTo(cx + TILE_W / 4, top - TILE_H / 8);
-    ctx.closePath();
-    ctx.fill();
-  }
-  if (n.nw) {
-    const grad = ctx.createLinearGradient(cx, top - TILE_H / 2, cx - TILE_W / 4, top - TILE_H / 4);
-    grad.addColorStop(0, "rgba(0,0,0,0.25)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(cx, top - TILE_H / 2);
-    ctx.lineTo(cx - TILE_W / 2, top);
-    ctx.lineTo(cx - TILE_W / 4, top - TILE_H / 8);
-    ctx.closePath();
-    ctx.fill();
-  }
-}
-
-function drawWaterTop(d: DrawCtx, tile: Tile, cx: number, top: number, base: RGB, depth: number) {
-  const { ctx, mood, time, era } = d;
-  const future = era.index >= 8;
-  const deep = depthFog(hexToRgb("#1c4a78"), depth, mood);
-  const shallow = depthFog(future ? mixRgb(hexToRgb("#3f8fc4"), hexToRgb("#2effe8"), 0.25) : hexToRgb("#3f8fc4"), depth, mood);
-  // shallower (lower e closer to 0.3 boundary => shore) -> mix toward shallow
-  const shoreT = Math.max(0, Math.min(1, (0.3 - tile.e) / 0.3 + 0.3));
-  const wcol = mixRgb(deep, shallow, shoreT * 0.6);
-  ctx.fillStyle = rgbStr(litFace(wcol, 0.95, mood.ambient));
-  diamondPath(ctx, cx, top);
-  ctx.fill();
-
-  // two scrolling sine wavelets (opposite directions)
+// ============================================================================
+// face painting
+// ============================================================================
+function paintFace(ctx: Ctx, tex: AnyCanvas, p0x: number, p0y: number, ux: number, uy: number, vx: number, vy: number) {
   ctx.save();
-  diamondPath(ctx, cx, top);
-  ctx.clip();
-  const w1 = Math.sin(time * 1.3 + (tile.col - tile.row) * 0.9);
-  const w2 = Math.sin(-time * 0.9 + (tile.col + tile.row) * 1.1);
-  ctx.strokeStyle = rgbStr(scaleRgb(wcol, 1.4), 0.4);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx - TILE_W / 2, top + w1 * 2);
-  ctx.quadraticCurveTo(cx, top + 4 + w1 * 2, cx + TILE_W / 2, top + w1 * 2);
-  ctx.stroke();
-  ctx.strokeStyle = rgbStr(scaleRgb(wcol, 1.25), 0.3);
-  ctx.beginPath();
-  ctx.moveTo(cx - TILE_W / 2, top - 3 + w2 * 2);
-  ctx.quadraticCurveTo(cx, top + 1 + w2 * 2, cx + TILE_W / 2, top - 3 + w2 * 2);
-  ctx.stroke();
-  ctx.restore();
-
-  // shore foam pulse near shallow tiles
-  if (shoreT > 0.55) {
-    const pulse = 0.3 + 0.3 * (0.5 + 0.5 * Math.sin(time * 2.2 + tile.col + tile.row));
-    const foam = future ? "rgba(200,255,250," : "rgba(207,234,247,";
-    ctx.strokeStyle = `${foam}${pulse.toFixed(2)})`;
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(cx - TILE_W / 2 + 4, top + TILE_H / 2 - 4);
-    ctx.lineTo(cx, top + TILE_H / 2 - 1);
-    ctx.lineTo(cx + TILE_W / 2 - 4, top + TILE_H / 2 - 4);
-    ctx.stroke();
-  }
-}
-
-function drawTileDetail(d: DrawCtx, tile: Tile, cx: number, top: number, topC: RGB) {
-  const { ctx } = d;
-  const r = makeRng(((tile.col + 1) * 92821) ^ ((tile.row + 1) * 53987));
-  ctx.save();
-  diamondPath(ctx, cx, top);
-  ctx.clip();
-  if (tile.terrain === "grass" || tile.terrain === "forest") {
-    // noise lightness blobs
-    const blobs = 4 + Math.floor(r() * 3);
-    for (let i = 0; i < blobs; i++) {
-      const bx = cx + (r() - 0.5) * TILE_W * 0.7;
-      const by = top + (r() - 0.5) * TILE_H * 0.7;
-      const k = r() > 0.5 ? 1.08 : 0.92;
-      ctx.fillStyle = rgbStr(scaleRgb(topC, k), 0.5);
-      ctx.beginPath();
-      ctx.ellipse(bx, by, 6 + r() * 4, 3 + r() * 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // edge grass blades
-    const blades = 5 + Math.floor(r() * 3);
-    ctx.strokeStyle = rgbStr(scaleRgb(topC, 0.7), 0.7);
-    ctx.lineWidth = 1;
-    for (let i = 0; i < blades; i++) {
-      const bx = cx + (r() - 0.5) * TILE_W * 0.55;
-      const by = top + (r() - 0.5) * TILE_H * 0.4 + 2;
-      ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(bx + (r() - 0.5) * 2, by - 3 - r() * 2);
-      ctx.stroke();
-    }
-  } else if (tile.terrain === "sand") {
-    for (let i = 0; i < 5; i++) {
-      const bx = cx + (r() - 0.5) * TILE_W * 0.6;
-      const by = top + (r() - 0.5) * TILE_H * 0.6;
-      ctx.fillStyle = rgbStr(scaleRgb(topC, 0.85), 0.5);
-      ctx.beginPath();
-      ctx.arc(bx, by, 0.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else if (tile.terrain === "rock") {
-    // cracks
-    ctx.strokeStyle = rgbStr(scaleRgb(topC, 0.55), 0.6);
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 2 + Math.floor(r() * 2); i++) {
-      const sx = cx + (r() - 0.5) * TILE_W * 0.4;
-      const sy = top + (r() - 0.5) * TILE_H * 0.4;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + (r() - 0.5) * 14, sy + (r() - 0.5) * 8);
-      ctx.stroke();
-    }
-    // protruding highlight
-    ctx.fillStyle = rgbStr(scaleRgb(topC, 1.3), 0.6);
-    ctx.beginPath();
-    ctx.ellipse(cx + (r() - 0.5) * 8, top - 2, 4, 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (tile.terrain === "snow") {
-    // blue shadow patch + sparkle
-    ctx.fillStyle = "rgba(150,180,230,0.3)";
-    ctx.beginPath();
-    ctx.ellipse(cx + (r() - 0.5) * 10, top + 3, 8, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    for (let i = 0; i < 3; i++) {
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.beginPath();
-      ctx.arc(cx + (r() - 0.5) * TILE_W * 0.5, top + (r() - 0.5) * TILE_H * 0.5, 0.7, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
+  ctx.imageSmoothingEnabled = false;
+  ctx.setTransform(ux / TS, uy / TS, vx / TS, vy / TS, p0x, p0y);
+  ctx.drawImage(tex, -0.5, -0.5, TS + 1, TS + 1);
   ctx.restore();
 }
-
-// directional drop shadow (ground projection)
-function drawDropShadow(d: DrawCtx, cx: number, baseY: number, height: number, radius: number) {
-  const { ctx } = d;
-  const len = height * 0.6;
-  // shadow falls opposite to sun (sun is to upper-left, so shadow to lower-right)
-  const dx = 0.5 * len * 0.5;
-  const dy = 0.4 * len * 0.4 + 4;
-  ctx.save();
-  ctx.filter = "blur(3px)";
-  ctx.fillStyle = "rgba(0,0,0,0.30)";
+function fillQuad(ctx: Ctx, pts: number[], color: string) {
   ctx.beginPath();
-  ctx.ellipse(cx + dx, baseY + dy * 0.3, radius * 1.1, radius * 0.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-// ---------------------------------------------------------------------------
-// trees / buildings / character
-// ---------------------------------------------------------------------------
-function drawTree(d: DrawCtx, cx: number, baseY: number) {
-  const { ctx, era, mood } = d;
-  const canopy = era.index >= 8 ? mixRgb(hexToRgb("#2f5d2f"), hexToRgb(era.palette.accent), 0.35) : hexToRgb("#2f6b34");
-  drawDropShadow(d, cx, baseY, 14, 6);
-  ctx.fillStyle = "#6b4a2b";
-  ctx.fillRect(cx - 1.5, baseY - 10, 3, 10);
-  const lit = (c: RGB, f: number) => rgbStr(litFace(c, f, mood.ambient));
-  ctx.fillStyle = lit(canopy, 0.82);
-  ctx.beginPath();
-  ctx.arc(cx, baseY - 14, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = lit(canopy, 1.0);
-  ctx.beginPath();
-  ctx.arc(cx - 3, baseY - 12, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = lit(scaleRgb(canopy, 1.12), 1.0);
-  ctx.beginPath();
-  ctx.arc(cx + 3, baseY - 16, 5, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawBuilding(d: DrawCtx, cx: number, baseY: number, h: number, seedTile: number) {
-  const { ctx, emis, era, mood, time } = d;
-  const { structure, palette } = era;
-  const wallW = TILE_W * 0.46;
-  const left = litFace(hexToRgb(palette.structure), FACE_LEFT, mood.ambient);
-  const right = litFace(hexToRgb(palette.structure), FACE_RIGHT, mood.ambient);
-  const top = baseY - h;
-  const r = makeRng(seedTile);
-  const accent = hexToRgb(palette.accent);
-
-  drawDropShadow(d, cx, baseY, h, wallW * 0.7);
-
-  // walls
-  ctx.fillStyle = rgbStr(left);
-  ctx.beginPath();
-  ctx.moveTo(cx - wallW / 2, baseY);
-  ctx.lineTo(cx, baseY + TILE_H / 4);
-  ctx.lineTo(cx, top + TILE_H / 4);
-  ctx.lineTo(cx - wallW / 2, top);
+  ctx.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
   ctx.closePath();
+  ctx.fillStyle = color;
   ctx.fill();
-  ctx.fillStyle = rgbStr(right);
-  ctx.beginPath();
-  ctx.moveTo(cx + wallW / 2, baseY);
-  ctx.lineTo(cx, baseY + TILE_H / 4);
-  ctx.lineTo(cx, top + TILE_H / 4);
-  ctx.lineTo(cx + wallW / 2, top);
-  ctx.closePath();
-  ctx.fill();
-
-  // roof
-  const roofC = hexToRgb(palette.structureRoof);
-  const pitched = ["hut", "temple", "keep", "manor"].includes(structure);
-  if (pitched) {
-    const peak = top - TILE_H * 0.55;
-    ctx.fillStyle = rgbStr(litFace(roofC, 0.9, mood.ambient));
-    ctx.beginPath();
-    ctx.moveTo(cx - wallW / 2, top);
-    ctx.lineTo(cx, top + TILE_H / 4);
-    ctx.lineTo(cx + wallW / 2, top);
-    ctx.lineTo(cx, peak);
-    ctx.closePath();
-    ctx.fill();
-  } else {
-    ctx.fillStyle = rgbStr(litFace(roofC, 1.0, mood.ambient));
-    ctx.beginPath();
-    ctx.moveTo(cx - wallW / 2, top);
-    ctx.lineTo(cx, top + TILE_H / 4);
-    ctx.lineTo(cx + wallW / 2, top);
-    ctx.lineTo(cx, top - TILE_H / 4);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // ---- era-specific silhouette details ----
-  drawEraDetails(d, structure, cx, baseY, top, wallW, h, r, accent);
-
-  // ---- windows / neon → emissive layer for bloom ----
-  if (era.index >= 5) {
-    const rows = Math.min(8, Math.floor(h / 11));
-    for (let i = 0; i < rows; i++) {
-      const wy = top + 12 + i * 11;
-      if (wy > baseY - 5) break;
-      const litL = r() > 0.4;
-      // left wall windows
-      if (litL) {
-        emis.fillStyle = rgbStr(scaleRgb(accent, 1.1));
-        emis.fillRect(cx - wallW / 2 + 5, wy, 5, 6);
-      } else {
-        ctx.fillStyle = rgbStr(scaleRgb(left, 0.6));
-        ctx.fillRect(cx - wallW / 2 + 5, wy, 5, 6);
-      }
-      const litR = r() > 0.5;
-      if (litR) {
-        emis.fillStyle = rgbStr(scaleRgb(accent, 0.9));
-        emis.fillRect(cx + 4, wy, 5, 6);
-      } else {
-        ctx.fillStyle = rgbStr(scaleRgb(right, 0.6));
-        ctx.fillRect(cx + 4, wy, 5, 6);
-      }
-    }
-  } else {
-    // doorway
-    ctx.fillStyle = rgbStr(scaleRgb(left, 0.45));
-    ctx.fillRect(cx - 3, baseY - 9, 6, 9);
-  }
-  // suppress unused warning for time in non-animated branches
-  void time;
 }
 
-function drawEraDetails(
-  d: DrawCtx,
-  structure: string,
-  cx: number,
-  baseY: number,
-  top: number,
-  wallW: number,
-  h: number,
-  r: () => number,
-  accent: RGB,
-) {
-  const { ctx, emis, mood, time } = d;
-  switch (structure) {
-    case "temple": {
-      // front columns
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      const cols = 4;
-      for (let i = 0; i < cols; i++) {
-        const px = cx - wallW / 2 + 4 + (i * (wallW - 8)) / (cols - 1);
-        ctx.fillRect(px - 1, top + 6, 2, h - 8);
-      }
-      break;
-    }
-    case "keep": {
-      // crenellations + arrow slit + flag
-      ctx.fillStyle = rgbStr(scaleRgb(hexToRgb("#8d8f96"), 0.6));
-      for (let i = 0; i < 4; i++) {
-        ctx.fillRect(cx - wallW / 2 + i * (wallW / 4), top - 4, wallW / 8, 4);
-      }
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx - 6, top + 14);
-      ctx.lineTo(cx - 6, top + 22);
-      ctx.stroke();
-      // flag waving
-      const fw = Math.sin(time * 3) * 3;
-      ctx.fillStyle = rgbStr(accent);
-      ctx.beginPath();
-      ctx.moveTo(cx, top - TILE_H * 0.55);
-      ctx.lineTo(cx + 10 + fw, top - TILE_H * 0.55 + 3);
-      ctx.lineTo(cx, top - TILE_H * 0.55 + 7);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "#5a4a3a";
-      ctx.beginPath();
-      ctx.moveTo(cx, top);
-      ctx.lineTo(cx, top - TILE_H * 0.6);
-      ctx.stroke();
-      break;
-    }
-    case "factory": {
-      // chimney + smoke particles + saw-tooth roof
-      const chx = cx + wallW / 2 - 6;
-      ctx.fillStyle = rgbStr(scaleRgb(hexToRgb("#5a3a2a"), 1.0));
-      ctx.fillRect(chx, top - 18, 6, 18);
-      for (let i = 0; i < 4; i++) {
-        const t2 = (time * 0.6 + i * 0.3) % 1;
-        const sy = top - 18 - t2 * 26;
-        ctx.fillStyle = `rgba(80,80,80,${(0.4 * (1 - t2)).toFixed(2)})`;
-        ctx.beginPath();
-        ctx.arc(chx + 3 + Math.sin(t2 * 6) * 3, sy, 3 + t2 * 4, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
-    }
-    case "dome": {
-      // glowing ring + antenna
-      emis.strokeStyle = rgbStr(accent, 0.9);
-      emis.lineWidth = 2;
-      emis.beginPath();
-      emis.ellipse(cx, top, wallW / 2, TILE_H / 3, 0, 0, Math.PI * 2);
-      emis.stroke();
-      ctx.strokeStyle = rgbStr(scaleRgb(accent, 0.8));
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx, top - TILE_H / 4);
-      ctx.lineTo(cx, top - TILE_H / 4 - 12);
-      ctx.stroke();
-      emis.fillStyle = rgbStr(accent);
-      emis.beginPath();
-      emis.arc(cx, top - TILE_H / 4 - 12, 2, 0, Math.PI * 2);
-      emis.fill();
-      break;
-    }
-    case "arcology": {
-      // strong neon edge strips
-      emis.strokeStyle = rgbStr(accent);
-      emis.lineWidth = 2.2;
-      emis.beginPath();
-      emis.moveTo(cx - wallW / 2, baseY);
-      emis.lineTo(cx - wallW / 2, top);
-      emis.lineTo(cx, top + TILE_H / 4);
-      emis.lineTo(cx + wallW / 2, top);
-      emis.lineTo(cx + wallW / 2, baseY);
-      emis.stroke();
-      emis.strokeStyle = rgbStr(hexToRgb("#ff6ad8"));
-      emis.lineWidth = 1.4;
-      emis.beginPath();
-      emis.moveTo(cx, top + TILE_H / 4);
-      emis.lineTo(cx, baseY + TILE_H / 4);
-      emis.stroke();
-      break;
-    }
-    case "tower": {
-      // glass curtain-wall grid lines
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
-      ctx.lineWidth = 1;
-      for (let gx = cx - wallW / 2 + 6; gx < cx + wallW / 2; gx += 8) {
-        ctx.beginPath();
-        ctx.moveTo(gx, top);
-        ctx.lineTo(gx, baseY);
-        ctx.stroke();
-      }
-      break;
-    }
-    default:
-      break;
-  }
-  void mood;
-}
-
-function drawCharacter(d: DrawCtx, cx: number, feetY: number, character: Character) {
-  const { ctx, emis, era, mood, time } = d;
-  const maturity = Math.min(1, character.age / 80);
-  const scale = (0.8 + maturity * 0.5) * 1.4; // 1.3~1.5× emphasis
-  const bodyH = 18 * scale;
-  const headR = 4.5 * scale;
-  const robe = hexToRgb(era.palette.accent);
-  const skin: RGB = [240, 201, 160];
-  const bodyTop = feetY - bodyH;
-  const headCy = bodyTop - headR;
-  const accent = hexToRgb(era.palette.accent);
-
-  // focus ring (pulse)
-  const pulse = 0.18 + 0.12 * (0.5 + 0.5 * Math.sin(time * 2.4));
-  ctx.strokeStyle = rgbStr(accent, pulse);
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(cx, feetY + 2, 13 * scale, 5.5 * scale, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  drawDropShadow(d, cx, feetY, bodyH, 9 * scale);
-
-  // spirit aura — rising particles when spirit high
-  const spirit = character.attributes.spirit ?? 0;
-  if (spirit > 20) {
-    const count = Math.min(8, Math.floor(spirit / 12));
-    for (let i = 0; i < count; i++) {
-      const ph = (time * 0.5 + i / count) % 1;
-      const ax = cx + Math.sin(time + i * 2) * 8 * scale;
-      const ay = feetY - ph * (bodyH + 18);
-      emis.fillStyle = rgbStr(accent, (1 - ph) * 0.8);
-      emis.beginPath();
-      emis.arc(ax, ay, 1.4, 0, Math.PI * 2);
-      emis.fill();
-    }
-  }
-
-  // robe (two faces)
-  ctx.fillStyle = rgbStr(litFace(robe, FACE_LEFT, mood.ambient));
-  ctx.beginPath();
-  ctx.moveTo(cx - 5 * scale, feetY);
-  ctx.lineTo(cx + 5 * scale, feetY);
-  ctx.lineTo(cx + 3.5 * scale, bodyTop);
-  ctx.lineTo(cx - 3.5 * scale, bodyTop);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = rgbStr(litFace(robe, FACE_RIGHT, mood.ambient));
-  ctx.beginPath();
-  ctx.moveTo(cx, feetY);
-  ctx.lineTo(cx + 5 * scale, feetY);
-  ctx.lineTo(cx + 3.5 * scale, bodyTop);
-  ctx.lineTo(cx, bodyTop);
-  ctx.closePath();
-  ctx.fill();
-
-  // head
-  ctx.fillStyle = rgbStr(skin);
-  ctx.beginPath();
-  ctx.arc(cx, headCy, headR, 0, Math.PI * 2);
-  ctx.fill();
-  // hair / hood
-  ctx.fillStyle = rgbStr(scaleRgb(robe, 0.6));
-  ctx.beginPath();
-  ctx.arc(cx, headCy, headR, Math.PI, Math.PI * 2);
-  ctx.fill();
-
-  // rim light (1px)
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx - 3.5 * scale, bodyTop);
-  ctx.lineTo(cx - 5 * scale, feetY);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, headCy, headR, Math.PI * 0.9, Math.PI * 1.4);
-  ctx.stroke();
-}
-
-// ---------------------------------------------------------------------------
-// sky / atmosphere
-// ---------------------------------------------------------------------------
-function drawSky(d: DrawCtx, character: Character, width: number, height: number) {
-  const { ctx, mood, time, era } = d;
-  const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, rgbStr(mood.skyTop));
-  grad.addColorStop(0.55, rgbStr(mood.skyMid));
-  grad.addColorStop(1, rgbStr(mood.skyHorizon));
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, width, height);
-
-  const rs = makeRng((character.seed ^ 0x5eed) >>> 0);
-  if (mood.night) {
-    // stars twinkle
-    for (let i = 0; i < 60; i++) {
-      const sx = rs() * width;
-      const sy = rs() * height * 0.55;
-      const base2 = 0.3 + rs() * 0.5;
-      const tw = base2 * (0.6 + 0.4 * Math.sin(time * 2 + i));
-      ctx.fillStyle = `rgba(255,255,255,${tw.toFixed(2)})`;
-      ctx.beginPath();
-      ctx.arc(sx, sy, rs() * 1.1 + 0.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // occasional meteor
-    const meteorT = (time * 0.12) % 6;
-    if (meteorT < 0.5) {
-      const mx = width * 0.2 + meteorT * width * 0.6;
-      const my = height * 0.1 + meteorT * height * 0.2;
-      const g2 = ctx.createLinearGradient(mx - 30, my - 12, mx, my);
-      g2.addColorStop(0, "rgba(255,255,255,0)");
-      g2.addColorStop(1, "rgba(255,255,255,0.9)");
-      ctx.strokeStyle = g2;
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(mx - 30, my - 12);
-      ctx.lineTo(mx, my);
-      ctx.stroke();
-    }
-    // moon halo
-    const mx = width * 0.8;
-    const my = height * 0.2;
-    const halo = ctx.createRadialGradient(mx, my, 4, mx, my, 50);
-    halo.addColorStop(0, rgbStr(hexToRgb(era.palette.accent), 0.5));
-    halo.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(mx, my, 50, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = rgbStr(hexToRgb(era.palette.accent), 0.85);
-    ctx.beginPath();
-    ctx.arc(mx, my, 12, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    // sun + halo
-    const sx = width * 0.78;
-    const sy = height * 0.2;
-    const halo = ctx.createRadialGradient(sx, sy, 6, sx, sy, 70);
-    halo.addColorStop(0, "rgba(255,250,220,0.7)");
-    halo.addColorStop(1, "rgba(255,250,220,0)");
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 70, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,252,235,0.95)";
-    ctx.beginPath();
-    ctx.arc(sx, sy, 16, 0, Math.PI * 2);
-    ctx.fill();
-    // drifting clouds
-    for (let i = 0; i < 4; i++) {
-      const speed = 8 + i * 4;
-      const cxp = ((rs() * width + time * speed) % (width + 120)) - 60;
-      const cyp = height * (0.08 + rs() * 0.22);
-      ctx.fillStyle = "rgba(255,255,255,0.5)";
-      for (let b = 0; b < 4; b++) {
-        ctx.beginPath();
-        ctx.ellipse(cxp + b * 16, cyp + (b % 2) * 4, 18, 9, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-}
-
-function drawParticles(d: DrawCtx, character: Character, width: number, height: number) {
-  const { ctx, era, time, mood } = d;
-  const rs = makeRng((character.seed ^ 0xa11ce) >>> 0);
-  const count = 24 + Math.floor(character.chaos * 16);
-  let col = "rgba(255,255,255,0.25)";
-  if (era.index === 5) col = "rgba(90,80,70,0.4)"; // smog
-  else if (era.index >= 8) col = rgbStr(hexToRgb(era.palette.accent), 0.5); // data fireflies
-  else if (era.index >= 6) col = rgbStr(hexToRgb(era.palette.accent), 0.4);
-  if (mood.gold) col = "rgba(255,210,130,0.6)"; // boom gold particles
-
-  for (let i = 0; i < count; i++) {
-    const seedx = rs();
-    const seedy = rs();
-    const drift = era.index >= 8 ? Math.sin(time + i) * 20 : time * (6 + seedx * 8);
-    const px = (seedx * width + drift) % width;
-    const py = (seedy * height - (era.index === 5 ? -time * 4 : time * 6)) % height;
-    const yy = (py + height) % height;
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.arc(px, yy, era.index >= 8 ? 1.3 : 1, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// main scene draw (pre-post)
-// ---------------------------------------------------------------------------
-function buildNeighbourMap(tiles: Tile[], N: number): Map<string, NeighbourInfo> {
-  const layerAt = new Map<string, number>();
-  for (const t of tiles) layerAt.set(`${t.col},${t.row}`, t.layers);
-  const map = new Map<string, NeighbourInfo>();
-  for (const t of tiles) {
-    const here = t.layers;
-    const nw = (layerAt.get(`${t.col},${t.row - 1}`) ?? 0) > here; // up-left in iso (row-1)
-    const ne = (layerAt.get(`${t.col - 1},${t.row}`) ?? 0) > here; // up-right (col-1)
-    map.set(`${t.col},${t.row}`, { nw, ne });
-  }
-  return map;
-}
-
-interface SceneScene {
-  draw: (
-    ctx: CanvasRenderingContext2D,
-    emis: CanvasRenderingContext2D,
-    time: number,
-  ) => void;
-  era: Era;
-  mood: Mood;
-}
-
-export function prepareScene(character: Character, width: number, height: number): SceneScene {
+// ============================================================================
+// prepareScene
+// ============================================================================
+export function prepareScene(character: Character, W: number, H: number): SceneData {
   const era = getEra(character.techLevel);
-  const mood = buildMood(character, era);
+  const night = era.index >= 8;
+  const tiles = buildTiles(character);
   const N = character.territory;
-  const tiles = buildTiles(character, era);
-  const neighbours = buildNeighbourMap(tiles, N);
 
-  // fit-to-canvas transform
-  const spanX = N * TILE_W;
-  const maxBuildingH = 150;
-  const minY = -MAX_LAYERS * LAYER - maxBuildingH - TILE_H / 2;
-  const maxY = (N - 1) * TILE_H + TILE_H / 2 + BASE_DEPTH + MAX_LAYERS * LAYER;
-  const spanY = maxY - minY;
-  const minX = -((N - 1) * TILE_W) / 2 - TILE_W / 2;
-  const pad = 16;
-  const s = Math.min(2.0, (width - pad * 2) / spanX, (height - pad * 2) / spanY);
-  const tx = (width - s * spanX) / 2 - s * minX;
-  const ty = (height - s * spanY) / 2 - s * minY;
-
-  // home tile
+  const rb = makeRng((character.seed ^ (era.index * 2654435761)) >>> 0);
   const c0 = (N - 1) / 2;
   let home = tiles[0];
   let bestD = Infinity;
   for (const t of tiles) {
     if (t.terrain === "water") continue;
-    const dd = Math.hypot(t.col - c0, t.row - c0);
-    if (dd < bestD) {
-      bestD = dd;
+    const d = Math.hypot(t.col - c0, t.row - c0);
+    if (d < bestD) {
+      bestD = d;
       home = t;
     }
   }
-
-  // building placement (deterministic)
-  const rb = makeRng((character.seed ^ (era.index * 2654435761)) >>> 0);
-  const density = Math.min(N * N - 1, 3 + Math.floor(character.techLevel / 55) + Math.floor(N / 2));
   const buildable = tiles.filter(
-    (t) =>
-      (t.terrain === "grass" || t.terrain === "sand" || t.terrain === "forest") &&
-      t.layers <= 3 &&
-      !(t.col === home.col && t.row === home.row),
+    (t) => (t.terrain === "grass" || t.terrain === "sand" || t.terrain === "forest") && !(t.col === home.col && t.row === home.row),
   );
   for (let i = buildable.length - 1; i > 0; i--) {
-    const j = Math.floor(rb() * (i + 1));
+    const j = (rb() * (i + 1)) | 0;
     [buildable[i], buildable[j]] = [buildable[j], buildable[i]];
   }
-  const builtSet = new Set<string>();
+  const density = Math.min(N * N - 1, 3 + Math.floor(character.techLevel / 55) + Math.floor(N / 2));
+  const buildings: BuildingD[] = [];
+  const builtKey = new Set<string>();
   for (let i = 0; i < Math.min(density, buildable.length); i++) {
-    builtSet.add(`${buildable[i].col},${buildable[i].row}`);
+    const t = buildable[i];
+    builtKey.add(`${t.col},${t.row}`);
+    buildings.push({ col: t.col, row: t.row, floors: floorsFor(era, rb), seed: (t.col * 73 + t.row * 131) >>> 0 });
   }
-  const visualTier = Math.min(era.index, 9);
-  const ordered = [...tiles].sort((a, b) => a.col + a.row - (b.col + b.row));
 
-  const draw = (
-    ctx: CanvasRenderingContext2D,
-    emis: CanvasRenderingContext2D,
-    time: number,
-  ) => {
-    const d: DrawCtx = { ctx, emis, mood, era, time, N };
-
-    drawSky(d, character, width, height);
-
-    ctx.save();
-    ctx.translate(tx, ty);
-    ctx.scale(s, s);
-    emis.save();
-    emis.translate(tx, ty);
-    emis.scale(s, s);
-
-    for (const t of ordered) {
-      const g = groundPos(t.col, t.row);
-      const nb = neighbours.get(`${t.col},${t.row}`) ?? { nw: false, ne: false };
-      drawTileColumn(d, t, g.x, g.y, nb);
-      const topY = g.y - t.layers * LAYER;
-
-      if (t.terrain === "forest" && !builtSet.has(`${t.col},${t.row}`)) {
-        const tr = makeRng(((t.col + 5) * 40503) ^ ((t.row + 5) * 12289));
-        const n = 1 + Math.floor(tr() * 2);
-        for (let k = 0; k < n; k++) {
-          drawTree(d, g.x + (tr() - 0.5) * 16, topY + (tr() - 0.5) * 8);
-        }
-      }
-      if (builtSet.has(`${t.col},${t.row}`)) {
-        const baseH = 16 + visualTier * 5;
-        const h =
-          baseH +
-          makeRng(((t.col + 1) * 7919) ^ ((t.row + 1) * 104729))() * (visualTier >= 6 ? 70 : 22);
-        drawBuilding(d, g.x, topY, h, ((t.col * 31 + t.row) ^ era.index) >>> 0);
-      }
-      if (t.col === home.col && t.row === home.row) {
-        drawCharacter(d, g.x, topY, character);
-      }
-    }
-
-    ctx.restore();
-    emis.restore();
-
-    drawParticles(d, character, width, height);
+  // fit-to-canvas (extents at S=1)
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  const consider = (col: number, row: number, topZ: number, botExtra: number) => {
+    const x = (col - row) * HW;
+    const yTop = (col + row) * HH - topZ * CUBE_H - HH;
+    const yBot = (col + row) * HH + HH + botExtra;
+    minX = Math.min(minX, x - HW);
+    maxX = Math.max(maxX, x + HW);
+    minY = Math.min(minY, yTop);
+    maxY = Math.max(maxY, yBot);
   };
-
-  return { draw, era, mood };
-}
-
-// ---------------------------------------------------------------------------
-// post-processing (bloom, tone-map, vignette, grain)
-// ---------------------------------------------------------------------------
-function makeCanvas(w: number, h: number): { c: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D } {
-  if (typeof OffscreenCanvas !== "undefined") {
-    const c = new OffscreenCanvas(w, h);
-    const ctx = c.getContext("2d") as unknown as CanvasRenderingContext2D;
-    return { c, ctx };
+  for (const t of tiles) consider(t.col, t.row, t.layers, t.terrain === "water" ? 0 : BASE_DEPTH);
+  for (const b of buildings) {
+    const t = tiles.find((x) => x.col === b.col && x.row === b.row)!;
+    consider(b.col, b.row, t.layers + b.floors + 2, BASE_DEPTH);
   }
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  return { c, ctx: c.getContext("2d")! };
+  const spanX = maxX - minX || 1;
+  const spanY = maxY - minY || 1;
+  const pad = 18;
+  const S = Math.min(2.4, (W - pad * 2) / spanX, (H - pad * 2) / spanY);
+  const ox = (W - spanX * S) / 2 - minX * S;
+  const oy = (H - spanY * S) / 2 - minY * S;
+  const SHW = HW * S;
+  const SHH = HH * S;
+  const SCH = CUBE_H * S;
+  const SDEPTH = BASE_DEPTH * S;
+  const project = (col: number, row: number, z: number) => ({ x: ox + (col - row) * SHW, y: oy + (col + row) * SHH - z * SCH });
+
+  const baseMade = makeCanvas(W, H)!;
+  const glowMade = makeCanvas(W, H)!;
+  const ctx = baseMade.ctx;
+  const gctx = glowMade.ctx;
+
+  paintSky(ctx, gctx, era, night, W, H);
+
+  const stars: SceneData["stars"] = [];
+  const clouds: SceneData["clouds"] = [];
+  const rs = makeRng((character.seed ^ 0x51ed) >>> 0);
+  if (night) {
+    for (let i = 0; i < 70; i++) stars.push({ x: rs() * W, y: rs() * H * 0.55, r: 0.5 + rs() * 1.3, p: rs() * Math.PI * 2 });
+  } else {
+    for (let i = 0; i < 4; i++) clouds.push({ x: rs() * W, y: 30 + rs() * H * 0.22, s: 0.7 + rs() * 0.8 });
+  }
+
+  const ordered = [...tiles].sort((a, b) => a.col + a.row - (b.col + b.row));
+  const water: { x: number; y: number }[] = [];
+  const treeRng = makeRng((character.seed ^ 0xa11) >>> 0);
+
+  for (const t of ordered) {
+    const top = project(t.col, t.row, t.layers);
+    if (t.terrain === "water") {
+      drawColumn(ctx, top.x, top.y, SHW, SHH, SCH, 1, SDEPTH * 0.4, "water", "water_deep", "water_deep");
+      water.push({ x: top.x, y: top.y });
+    } else {
+      const m = terrainMats(t.terrain);
+      drawColumn(ctx, top.x, top.y, SHW, SHH, SCH, t.layers, SDEPTH, m.top, m.sideTop, m.sideDeep);
+    }
+    if (t.terrain === "forest" && !builtKey.has(`${t.col},${t.row}`)) {
+      const n = 1 + ((treeRng() * 2) | 0);
+      for (let k = 0; k < n; k++) drawTree(ctx, top.x + (treeRng() - 0.5) * SHW * 0.7, top.y + (treeRng() - 0.5) * SHH * 0.7, S, era);
+    }
+    const b = buildings.find((x) => x.col === t.col && x.row === t.row);
+    if (b) drawBuilding(ctx, gctx, top.x, top.y, SHW, SHH, SCH, b, era);
+  }
+
+  const homeTop = project(home.col, home.row, home.layers);
+
+  const particles: SceneData["particles"] = [];
+  const pr = makeRng((character.seed ^ 0xbeef) >>> 0);
+  const pc = particleConf(era);
+  for (let i = 0; i < pc.count; i++)
+    particles.push({ x: pr() * W, y: pr() * H, vx: (pr() - 0.5) * pc.spd, vy: -pc.rise * (0.5 + pr()), c: pc.color, r: 0.6 + pr() * pc.size });
+
+  return {
+    era,
+    night,
+    base: baseMade.canvas,
+    glow: glowMade.canvas,
+    W,
+    H,
+    S,
+    water,
+    clouds,
+    stars,
+    particles,
+    charX: homeTop.x,
+    charY: homeTop.y,
+    charScale: S * (0.9 + Math.min(1, character.age / 80) * 0.5),
+  };
 }
 
-/**
- * Renders one frame into `target` with the full post chain. `target` must be a
- * 2D context sized (width,height). Safe to call only when a canvas backend is
- * available (browser / worker). Returns nothing.
- */
-export function renderFrame(
-  target: CanvasRenderingContext2D,
-  scene: SceneScene,
-  character: Character,
-  width: number,
-  height: number,
-  time: number,
+function floorsFor(era: Era, rng: () => number): number {
+  const i = era.index;
+  if (i <= 1) return 1 + ((rng() * 2) | 0);
+  if (i === 2) return 2;
+  if (i === 3) return 2 + ((rng() * 2) | 0);
+  if (i === 4) return 2 + ((rng() * 2) | 0);
+  if (i === 5) return 2 + ((rng() * 2) | 0);
+  if (i === 6 || i === 7) return 4 + ((rng() * 6) | 0);
+  if (i === 8) return 2 + ((rng() * 2) | 0);
+  return 6 + ((rng() * 9) | 0);
+}
+
+function terrainMats(t: Terrain): { top: string; sideTop: string; sideDeep: string } {
+  switch (t) {
+    case "grass":
+    case "forest":
+      return { top: "grass", sideTop: "dirt_grass", sideDeep: "dirt" };
+    case "sand":
+      return { top: "sand", sideTop: "sand", sideDeep: "sand" };
+    case "rock":
+      return { top: "stone", sideTop: "stone_side", sideDeep: "stone_side" };
+    case "snow":
+      return { top: "snow", sideTop: "snow", sideDeep: "stone_side" };
+    default:
+      return { top: "water", sideTop: "water_deep", sideDeep: "water_deep" };
+  }
+}
+
+function drawColumn(
+  ctx: Ctx,
+  cx: number,
+  cyTop: number,
+  shw: number,
+  shh: number,
+  sch: number,
+  layers: number,
+  baseDepth: number,
+  topMat: string,
+  sideTopMat: string,
+  sideDeepMat: string,
 ) {
-  const mood = scene.mood;
-
-  // base + emissive buffers
-  const base = makeCanvas(width, height);
-  const emisBuf = makeCanvas(width, height);
-  emisBuf.ctx.clearRect(0, 0, width, height);
-  scene.draw(base.ctx, emisBuf.ctx, time);
-
-  // ---- bloom: blur the emissive layer and add ----
-  const bloom = makeCanvas(width, height);
-  bloom.ctx.filter = `blur(${(4 + mood.bloomStrength * 5).toFixed(1)}px)`;
-  bloom.ctx.drawImage(emisBuf.c as CanvasImageSource, 0, 0);
-  bloom.ctx.filter = "none";
-
-  // compose base
-  target.clearRect(0, 0, width, height);
-  target.drawImage(base.c as CanvasImageSource, 0, 0);
-
-  // add bloom (emissive is already above threshold by construction)
-  target.save();
-  target.globalCompositeOperation = "lighter";
-  target.globalAlpha = mood.bloomStrength;
-  target.drawImage(bloom.c as CanvasImageSource, 0, 0);
-  // a second tighter pass for the core glow
-  target.globalAlpha = mood.bloomStrength * 0.6;
-  target.drawImage(emisBuf.c as CanvasImageSource, 0, 0);
-  target.restore();
-
-  // ---- fog: bottom horizon haze ----
-  const fog = target.createLinearGradient(0, height * 0.5, 0, height);
-  fog.addColorStop(0, rgbStr(mood.skyHorizon, 0));
-  fog.addColorStop(1, rgbStr(mood.skyHorizon, mood.fog));
-  target.fillStyle = fog;
-  target.fillRect(0, 0, width, height);
-
-  // ---- chaos boom: golden overlay grade ----
-  if (mood.gold && mood.goldAmt > 0) {
-    target.save();
-    target.globalCompositeOperation = "soft-light";
-    target.fillStyle = rgbStr(mood.gold, Math.min(0.5, mood.goldAmt * 1.6));
-    target.fillRect(0, 0, width, height);
-    target.restore();
+  for (let i = 0; i < layers; i++) {
+    const yt = cyTop + i * sch;
+    const mat = i === 0 ? sideTopMat : sideDeepMat;
+    paintFace(ctx, getTex(mat, F_LEFT), cx - shw, yt, shw, shh, 0, sch);
+    paintFace(ctx, getTex(mat, F_RIGHT), cx, yt + shh, shw, -shh, 0, sch);
   }
-  if (mood.desat > 0 && mood.cold) {
-    target.save();
-    target.globalCompositeOperation = "multiply";
-    target.fillStyle = rgbStr(mood.cold, mood.desat * 0.18);
-    target.fillRect(0, 0, width, height);
-    target.restore();
+  const yb = cyTop + layers * sch;
+  paintFace(ctx, getTex(sideDeepMat, F_LEFT), cx - shw, yb, shw, shh, 0, baseDepth);
+  paintFace(ctx, getTex(sideDeepMat, F_RIGHT), cx, yb + shh, shw, -shh, 0, baseDepth);
+  paintFace(ctx, getTex(topMat, F_TOP), cx - shw, cyTop, shw, -shh, shw, shh);
+}
+
+function drawTree(ctx: Ctx, cx: number, cyTop: number, S: number, era: Era) {
+  const trunkH = 10 * S;
+  const tw = 3 * S;
+  ctx.fillStyle = "rgba(0,0,0,0.20)";
+  ctx.beginPath();
+  ctx.ellipse(cx, cyTop + 1, 7 * S, 3 * S, 0, 0, Math.PI * 2);
+  ctx.fill();
+  fillQuad(ctx, [cx - tw / 2, cyTop, cx, cyTop + 1.5 * S, cx, cyTop + 1.5 * S - trunkH, cx - tw / 2, cyTop - trunkH], mul("#6e4a2a", 0.8));
+  fillQuad(ctx, [cx, cyTop + 1.5 * S, cx + tw / 2, cyTop, cx + tw / 2, cyTop - trunkH, cx, cyTop + 1.5 * S - trunkH], mul("#6e4a2a", 0.6));
+  const shw = 6 * S,
+    shh = 3 * S,
+    sch = 7 * S;
+  const ly = cyTop - trunkH - sch + shh;
+  void era;
+  paintFace(ctx, getTex("leaf", F_LEFT), cx - shw, ly, shw, shh, 0, sch);
+  paintFace(ctx, getTex("leaf", F_RIGHT), cx, ly + shh, shw, -shh, 0, sch);
+  paintFace(ctx, getTex("leaf", F_TOP), cx - shw, ly, shw, -shh, shw, shh);
+}
+
+// ---- buildings ----
+function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number, shh: number, sch: number, b: BuildingD, era: Era) {
+  const rng = makeRng(b.seed ^ (era.index * 99991));
+  const bw = shw * 0.8;
+  const bh = shh * 0.8;
+  const floors = b.floors;
+  const spec = buildingSpec(era);
+
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(cx + bw * 0.35, cyTop + bh * 0.35, bw * 1.1, bh * 1.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (let i = 0; i < floors; i++) {
+    const yt = cyTop - (i + 1) * sch;
+    paintFace(ctx, getTex(spec.wall, F_LEFT), cx - bw, yt, bw, bh, 0, sch);
+    paintFace(ctx, getTex(spec.wall, F_RIGHT), cx, yt + bh, bw, -bh, 0, sch);
+    if (spec.windows) {
+      const lit = makeWindowTex(b.seed + i, era);
+      paintFace(ctx, lit, cx - bw, yt, bw, bh, 0, sch);
+      paintFace(ctx, lit, cx, yt + bh, bw, -bh, 0, sch);
+      paintFace(gctx, lit, cx - bw, yt, bw, bh, 0, sch);
+      paintFace(gctx, lit, cx, yt + bh, bw, -bh, 0, sch);
+    }
   }
 
-  // ---- vignette ----
-  const vg = target.createRadialGradient(
-    width / 2,
-    height / 2,
-    Math.min(width, height) * 0.35,
-    width / 2,
-    height / 2,
-    Math.max(width, height) * 0.72,
-  );
+  const roofY = cyTop - floors * sch;
+  if (spec.roof === "pitch") drawPitchRoof(ctx, cx, roofY, bw, bh, sch * 0.9, spec.roofMat);
+  else paintFace(ctx, getTex(spec.roofMat, F_TOP), cx - bw, roofY, bw, -bh, bw, bh);
+
+  switch (era.structure) {
+    case "temple":
+      drawColumns(ctx, cx, cyTop, bw, sch * floors);
+      break;
+    case "keep":
+      drawCrenellations(ctx, cx, roofY, bw, bh);
+      break;
+    case "manor":
+      drawChimney(ctx, cx - bw * 0.4, roofY, sch, "tile_roof");
+      break;
+    case "factory":
+      drawChimney(ctx, cx + bw * 0.3, roofY, sch * 1.8, "brick");
+      break;
+    case "tower":
+    case "arcology":
+      drawAntenna(ctx, gctx, cx, roofY, sch, era);
+      if (era.structure === "arcology") drawNeonEdges(ctx, gctx, cx, cyTop, bw, bh, sch * floors, era);
+      break;
+    case "dome":
+      drawDome(ctx, gctx, cx, roofY, bw, bh, era);
+      break;
+  }
+  void rng;
+}
+
+interface BSpec {
+  wall: string;
+  roof: "pitch" | "flat";
+  roofMat: string;
+  windows: boolean;
+}
+function buildingSpec(era: Era): BSpec {
+  switch (era.structure) {
+    case "hut":
+      return { wall: "planks", roof: "pitch", roofMat: "thatch", windows: false };
+    case "temple":
+      return { wall: "stone", roof: "flat", roofMat: "stone", windows: false };
+    case "keep":
+      return { wall: "stonebrick", roof: "flat", roofMat: "stonebrick", windows: false };
+    case "manor":
+      return { wall: "plaster", roof: "pitch", roofMat: "tile_roof", windows: false };
+    case "factory":
+      return { wall: "brick", roof: "flat", roofMat: "brick", windows: false };
+    case "tower":
+      return { wall: "glass", roof: "flat", roofMat: "metal", windows: true };
+    case "dome":
+      return { wall: "metal", roof: "flat", roofMat: "metal", windows: true };
+    case "arcology":
+      return { wall: "glass_neon", roof: "flat", roofMat: "metal", windows: true };
+    default:
+      return { wall: "stone", roof: "flat", roofMat: "stone", windows: false };
+  }
+}
+
+function makeWindowTex(seed: number, era: Era): AnyCanvas {
+  const key = `win${seed % 64}_${era.index >= 8 ? "n" : "d"}`;
+  const cached = baseTexCache.get(key);
+  if (cached) return cached;
+  const made = makeCanvas(TS, TS)!;
+  const ctx = made.ctx;
+  const r = makeRng(seed + 1);
+  const lit = era.index >= 8 ? (r() > 0.5 ? "#ff5ad8" : "#5af0ff") : r() > 0.5 ? "#ffd98a" : "#ffffee";
+  for (let cy = 0; cy < TS; cy += 5)
+    for (let cx = 0; cx < TS; cx += 5)
+      if (r() > 0.45) for (let y = 1; y < 4; y++) for (let x = 1; x < 4; x++) px(ctx, cx + x, cy + y, lit);
+  baseTexCache.set(key, made.canvas);
+  return made.canvas;
+}
+
+function matColor(mat: string): string {
+  switch (mat) {
+    case "thatch":
+      return "#caa242";
+    case "tile_roof":
+      return "#a8432f";
+    case "stone":
+      return "#8f877b";
+    case "stonebrick":
+      return "#7f7a70";
+    case "metal":
+      return "#aab2be";
+    case "brick":
+      return "#9c4a38";
+    default:
+      return "#999999";
+  }
+}
+
+function drawPitchRoof(ctx: Ctx, cx: number, roofY: number, bw: number, bh: number, height: number, mat: string) {
+  const peakY = roofY - height;
+  const base = matColor(mat);
+  fillQuad(ctx, [cx - bw, roofY, cx, roofY + bh, cx, peakY], mul(base, F_LEFT));
+  fillQuad(ctx, [cx, roofY + bh, cx + bw, roofY, cx, peakY], mul(base, F_RIGHT));
+  fillQuad(ctx, [cx - bw, roofY, cx, peakY, cx + bw, roofY, cx, roofY - bh * 0.2], mul(base, 1.05));
+  ctx.strokeStyle = mul(base, 1.2);
+  ctx.lineWidth = Math.max(1, bw * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(cx, peakY);
+  ctx.lineTo(cx, roofY + bh);
+  ctx.stroke();
+}
+
+function drawColumns(ctx: Ctx, cx: number, cyTop: number, bw: number, height: number) {
+  const col = "#e6e0d2";
+  for (const dx of [-bw * 0.6, -bw * 0.2, bw * 0.2, bw * 0.6]) {
+    ctx.fillStyle = mul(col, dx < 0 ? F_LEFT : F_RIGHT);
+    ctx.fillRect(cx + dx - 1.5, cyTop - height, 3, height);
+  }
+}
+
+function drawCrenellations(ctx: Ctx, cx: number, roofY: number, bw: number, bh: number) {
+  const m = "#7f7a70";
+  const n = 4;
+  for (let i = 0; i <= n; i++) {
+    if (i % 2 !== 0) continue;
+    const tt = i / n;
+    const x = cx - bw + tt * 2 * bw;
+    const y = roofY + (tt - 0.5) * 2 * bh;
+    ctx.fillStyle = mul(m, F_TOP);
+    ctx.fillRect(x - 2, y - 6, 4, 6);
+  }
+}
+
+function drawChimney(ctx: Ctx, cx: number, roofY: number, h: number, mat: string) {
+  const w = 5;
+  ctx.fillStyle = mul(matColor(mat), F_LEFT);
+  ctx.fillRect(cx - w / 2, roofY - h, w, h);
+  ctx.fillStyle = mul(matColor(mat), F_RIGHT);
+  ctx.fillRect(cx, roofY - h, w / 2, h);
+}
+
+function drawAntenna(ctx: Ctx, gctx: Ctx, cx: number, roofY: number, sch: number, era: Era) {
+  ctx.strokeStyle = "#cfd6df";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx, roofY);
+  ctx.lineTo(cx, roofY - sch * 1.2);
+  ctx.stroke();
+  const c = era.palette.accent;
+  ctx.fillStyle = c;
+  ctx.beginPath();
+  ctx.arc(cx, roofY - sch * 1.2, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  gctx.fillStyle = c;
+  gctx.beginPath();
+  gctx.arc(cx, roofY - sch * 1.2, 4, 0, Math.PI * 2);
+  gctx.fill();
+}
+
+function drawDome(ctx: Ctx, gctx: Ctx, cx: number, roofY: number, bw: number, bh: number, era: Era) {
+  ctx.fillStyle = mul("#cdd8e6", 0.9);
+  ctx.beginPath();
+  ctx.ellipse(cx, roofY + bh * 0.2, bw * 0.9, bw * 0.6, 0, Math.PI, 0);
+  ctx.fill();
+  for (const g of [ctx, gctx]) {
+    g.strokeStyle = era.palette.accent;
+    g.lineWidth = g === gctx ? 3 : 2;
+    g.beginPath();
+    g.ellipse(cx, roofY + bh * 0.2, bw * 0.9, bw * 0.28, 0, Math.PI, 0);
+    g.stroke();
+  }
+}
+
+function drawNeonEdges(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, bw: number, bh: number, totalH: number, era: Era) {
+  const c = era.palette.accent;
+  const top = cyTop - totalH;
+  for (const g of [ctx, gctx]) {
+    g.strokeStyle = c;
+    g.lineWidth = g === gctx ? 3 : 1.5;
+    g.beginPath();
+    g.moveTo(cx, cyTop + bh);
+    g.lineTo(cx, top + bh);
+    g.moveTo(cx - bw, top);
+    g.lineTo(cx, top + bh);
+    g.lineTo(cx + bw, top);
+    g.stroke();
+  }
+}
+
+// ---- sky ----
+function paintSky(ctx: Ctx, gctx: Ctx, era: Era, night: boolean, W: number, H: number) {
+  const p = era.palette;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  if (night) {
+    grad.addColorStop(0, mul(p.sky, 0.7));
+    grad.addColorStop(0.6, p.sky);
+    grad.addColorStop(1, mix(p.sky, "#000010", 0.4));
+  } else {
+    grad.addColorStop(0, mul(p.sky, 1.08));
+    grad.addColorStop(0.55, p.sky);
+    grad.addColorStop(1, mix(p.sky, p.accent, 0.18));
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  const sx = W * 0.8;
+  const sy = H * 0.2;
+  if (night) {
+    ctx.fillStyle = mix("#cfe0ff", p.accent, 0.3);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 16, 0, Math.PI * 2);
+    ctx.fill();
+    gctx.fillStyle = mix("#cfe0ff", p.accent, 0.3);
+    gctx.beginPath();
+    gctx.arc(sx, sy, 26, 0, Math.PI * 2);
+    gctx.fill();
+  } else {
+    const sg = ctx.createRadialGradient(sx, sy, 4, sx, sy, 60);
+    sg.addColorStop(0, "rgba(255,250,220,0.9)");
+    sg.addColorStop(1, "rgba(255,250,220,0)");
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 60, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff7d8";
+    ctx.beginPath();
+    ctx.arc(sx, sy, 18, 0, Math.PI * 2);
+    ctx.fill();
+    gctx.fillStyle = "#fff7d8";
+    gctx.beginPath();
+    gctx.arc(sx, sy, 30, 0, Math.PI * 2);
+    gctx.fill();
+  }
+}
+
+function particleConf(era: Era): { count: number; color: string; spd: number; rise: number; size: number } {
+  const i = era.index;
+  if (i === 5) return { count: 26, color: "rgba(120,120,120,0.5)", spd: 6, rise: 8, size: 1.6 };
+  if (i === 7) return { count: 30, color: era.palette.accent, spd: 10, rise: 4, size: 1.2 };
+  if (i >= 8) return { count: 36, color: era.palette.accent, spd: 8, rise: 6, size: 1.4 };
+  return { count: 18, color: "rgba(255,255,220,0.5)", spd: 8, rise: 3, size: 1.2 };
+}
+
+// ============================================================================
+// renderFrame
+// ============================================================================
+export function renderFrame(ctx: Ctx, scene: SceneData, character: Character, W: number, H: number, t: number) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = true;
+
+  ctx.drawImage(scene.base, 0, 0);
+
+  if (!scene.night) {
+    for (const c of scene.clouds) {
+      const x = ((c.x + t * 6 * c.s) % (W + 120)) - 60;
+      drawCloud(ctx, x, c.y, c.s);
+    }
+  } else {
+    for (const s of scene.stars) {
+      const a = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 2 + s.p));
+      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // water shimmer
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const w of scene.water) {
+    const a = 0.1 + 0.1 * Math.sin(t * 1.5 + w.x * 0.05 + w.y * 0.03);
+    ctx.strokeStyle = `rgba(180,220,255,${a})`;
+    ctx.lineWidth = 1;
+    const off = Math.sin(t + w.x * 0.1) * scene.S * 2;
+    ctx.beginPath();
+    ctx.moveTo(w.x - scene.S * 8 + off, w.y);
+    ctx.quadraticCurveTo(w.x + off, w.y - scene.S * 3, w.x + scene.S * 8 + off, w.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // particles
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  for (const pt of scene.particles) {
+    let px2 = (pt.x + pt.vx * t) % W;
+    let py2 = (pt.y + pt.vy * t) % H;
+    if (px2 < 0) px2 += W;
+    if (py2 < 0) py2 += H;
+    ctx.fillStyle = pt.c;
+    ctx.beginPath();
+    ctx.arc(px2, py2, pt.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  drawCharacter(ctx, scene, character, t);
+
+  // bloom
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  try {
+    ctx.filter = scene.night ? "blur(6px)" : "blur(4px)";
+  } catch {
+    /* unsupported */
+  }
+  ctx.globalAlpha = scene.night ? 0.9 : 0.6;
+  ctx.drawImage(scene.glow, 0, 0);
+  ctx.filter = "none";
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // chaos grade
+  const chaos = character.chaos;
+  if (chaos < 0.4) {
+    ctx.fillStyle = `rgba(30,46,96,${(0.4 - chaos) * 0.8})`;
+    ctx.fillRect(0, 0, W, H);
+  } else if (chaos > 0.6) {
+    ctx.save();
+    ctx.globalCompositeOperation = "soft-light";
+    ctx.fillStyle = `rgba(255,196,90,${(chaos - 0.6) * 0.9})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // vignette
+  const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.62);
   vg.addColorStop(0, "rgba(0,0,0,0)");
-  vg.addColorStop(1, `rgba(0,0,0,${mood.vignette.toFixed(2)})`);
-  target.fillStyle = vg;
-  target.fillRect(0, 0, width, height);
-
-  // ---- film grain (light) ----
-  drawGrain(target, width, height, time);
+  vg.addColorStop(1, scene.night ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.32)");
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
 }
 
-let grainCanvas: { c: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D } | null = null;
-let grainTile = 96;
-function drawGrain(target: CanvasRenderingContext2D, width: number, height: number, time: number) {
-  if (!grainCanvas) {
-    grainCanvas = makeCanvas(grainTile, grainTile);
-    const img = grainCanvas.ctx.createImageData(grainTile, grainTile);
-    for (let i = 0; i < img.data.length; i += 4) {
-      const v = Math.random() * 255;
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-      img.data[i + 3] = 255;
-    }
-    grainCanvas.ctx.putImageData(img, 0, 0);
+function drawCloud(ctx: Ctx, x: number, y: number, s: number) {
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = "#ffffff";
+  for (const [dx, dy, r] of [
+    [0, 0, 18],
+    [16, 4, 14],
+    [-16, 4, 13],
+    [4, -6, 12],
+  ] as const) {
+    ctx.beginPath();
+    ctx.ellipse(x + dx * s, y + dy * s, r * s, r * s * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
-  target.save();
-  target.globalCompositeOperation = "overlay";
-  target.globalAlpha = 0.04;
-  const ox = Math.floor((time * 13) % grainTile);
-  const oy = Math.floor((time * 7) % grainTile);
-  for (let y = -oy; y < height; y += grainTile) {
-    for (let x = -ox; x < width; x += grainTile) {
-      target.drawImage(grainCanvas.c as CanvasImageSource, x, y);
-    }
+  ctx.restore();
+}
+
+function drawCharacter(ctx: Ctx, scene: SceneData, character: Character, t: number) {
+  const x = scene.charX;
+  const y = scene.charY;
+  const S = scene.charScale;
+  const accent = scene.era.palette.accent;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = hexA(accent, 0.18 + 0.1 * Math.sin(t * 2));
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(x, y + 1, 11 * S, 5 * S, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(x, y + 1, 7 * S, 3 * S, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const bodyH = 14 * S;
+  const bw = 5 * S;
+  const robe = accent;
+  fillQuad(ctx, [x - bw, y - 2 * S, x, y, x, y - bodyH, x - bw, y - bodyH - 2 * S], mul(robe, 0.8));
+  fillQuad(ctx, [x, y, x + bw, y - 2 * S, x + bw, y - bodyH - 2 * S, x, y - bodyH], mul(robe, 0.6));
+
+  const hy = y - bodyH - 2 * S;
+  const hw = 3.5 * S;
+  const skin = "#f0c9a0";
+  fillQuad(ctx, [x - hw, hy - 1 * S, x, hy, x, hy - 4 * S, x - hw, hy - 5 * S], mul(skin, 0.85));
+  fillQuad(ctx, [x, hy, x + hw, hy - 1 * S, x + hw, hy - 5 * S, x, hy - 4 * S], mul(skin, 0.65));
+  fillQuad(ctx, [x - hw, hy - 1 * S, x, hy - 5 * S, x + hw, hy - 1 * S, x, hy + S], mix(skin, "#ffffff", 0.1));
+
+  if (scene.era.index >= 6 || character.attributes.spirit > 400) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const ag = ctx.createRadialGradient(x, hy - 2 * S, 1, x, hy - 2 * S, 22 * S);
+    ag.addColorStop(0, hexA(accent, 0.35));
+    ag.addColorStop(1, hexA(accent, 0));
+    ctx.fillStyle = ag;
+    ctx.beginPath();
+    ctx.arc(x, hy - 2 * S, 22 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
-  target.restore();
 }
 
-/** True when a canvas 2D backend is available (browser or worker). */
-export function canRenderCanvas(): boolean {
-  return typeof document !== "undefined" || typeof OffscreenCanvas !== "undefined";
-}
-
-// expose era helpers re-export for convenience
 export { eraProgress };
