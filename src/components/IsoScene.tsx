@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useGameStore } from "@/store/gameStore";
-import { buildSceneInner } from "@/lib/scene";
+import { prepareScene, renderFrame } from "@/lib/renderer";
 import { getEra, eraProgress } from "@/lib/eras";
 
 const W = 640;
@@ -10,50 +10,59 @@ const H = 420;
 
 export default function IsoScene() {
   const character = useGameStore((s) => s.character);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Only rebuild the SVG when something visible changes (integer age / tech /
-  // territory), not on every sub-year frame.
+  // Rebuild the (static part of the) scene only when something visible changes.
   const ageInt = character ? Math.floor(character.age) : 0;
   const techInt = character ? Math.floor(character.techLevel) : 0;
   const territory = character?.territory ?? 0;
+  const chaosBucket = character ? Math.round(character.chaos * 20) : 0;
 
-  const { inner, era } = useMemo(() => {
-    if (!character) return { inner: "", era: getEra(0) };
-    return buildSceneInner(character, W, H);
+  const sceneRef = useRef<ReturnType<typeof prepareScene> | null>(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const scene = useMemo(() => {
+    if (!character) return null;
+    const s = prepareScene(character, W, H);
+    sceneRef.current = s;
+    return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character?.name, character?.seed, ageInt, techInt, territory]);
+  }, [character?.name, character?.seed, ageInt, techInt, territory, chaosBucket]);
+
+  useEffect(() => {
+    sceneRef.current = scene;
+  }, [scene]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !character) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let raf = 0;
+    const start = performance.now();
+    const loop = () => {
+      const t = (performance.now() - start) / 1000;
+      const s = sceneRef.current;
+      if (s) renderFrame(ctx, s, character, W, H, t);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character?.name, character?.seed]);
 
   if (!character) return null;
+  const era = getEra(character.techLevel);
   const progress = eraProgress(character.techLevel);
 
   return (
     <div className="relative w-full overflow-hidden rounded-xl border border-black/10 shadow-inner">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
+      <canvas
+        ref={canvasRef}
+        width={W}
+        height={H}
         className="block w-full"
-        style={{ background: era.palette.sky }}
-      >
-        <defs>
-          <linearGradient id="liveSky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor={era.palette.sky} />
-            <stop offset="1" stopColor={shade(era.palette.sky, -25)} />
-          </linearGradient>
-        </defs>
-        <rect width={W} height={H} fill="url(#liveSky)" />
-        <g dangerouslySetInnerHTML={{ __html: inner }} />
-      </svg>
-
-      {/* live "weather" tint driven by the chaotic fortune state */}
-      <div
-        className="pointer-events-none absolute inset-0 transition-colors duration-700"
-        style={{
-          background:
-            character.chaos < 0.4
-              ? `rgba(30,41,90,${(0.4 - character.chaos) * 0.9})` // 침체: cold gloom
-              : character.chaos > 0.6
-                ? `rgba(255,196,90,${(character.chaos - 0.6) * 0.5})` // 호황: warm glow
-                : "transparent",
-        }}
+        style={{ background: era.palette.sky, imageRendering: "auto" }}
       />
 
       <div className="pointer-events-none absolute left-0 top-0 m-3 rounded-lg bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
@@ -71,15 +80,4 @@ export default function IsoScene() {
       </div>
     </div>
   );
-}
-
-function shade(hex: string, amt: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  let r = (n >> 16) & 255;
-  let g = (n >> 8) & 255;
-  let b = n & 255;
-  r = Math.max(0, Math.min(255, r + amt));
-  g = Math.max(0, Math.min(255, g + amt));
-  b = Math.max(0, Math.min(255, b + amt));
-  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }

@@ -1,6 +1,7 @@
 import type { Character, Era } from "./types";
 import { getEra } from "./eras";
 import { fbm, hash2, makeRng } from "./chaos";
+import { prepareScene, renderFrame, canRenderCanvas } from "./renderer";
 
 // Isometric, elevated, textured scene. Terrain is generated from the world seed
 // (chaos.fbm) so every realm is unique; the visible grid grows with territory.
@@ -386,6 +387,33 @@ function escapeXml(s: string): string {
 export function captureSnapshot(character: Character, title: string): string {
   const W = 320;
   const H = 200;
+
+  // Preferred path: render the rich Canvas2D scene (lighting/AO/bloom/post) and
+  // export a PNG data URL. Falls back to the SVG generator when no canvas
+  // backend exists (e.g. SSR/static generation), keeping this function pure and
+  // SSR-safe while always returning a data URL.
+  if (canRenderCanvas()) {
+    try {
+      const cnv =
+        typeof document !== "undefined"
+          ? Object.assign(document.createElement("canvas"), { width: W, height: H })
+          : new OffscreenCanvas(W, H);
+      const ctx = cnv.getContext("2d") as CanvasRenderingContext2D | null;
+      if (ctx) {
+        const scene = prepareScene(character, W, H);
+        // deterministic "photo": freeze animation at t=0
+        renderFrame(ctx, scene, character, W, H, 0);
+        drawTitleBar(ctx, title, scene.era, character, W, H);
+        if (typeof document !== "undefined") {
+          return (cnv as HTMLCanvasElement).toDataURL("image/png");
+        }
+        // OffscreenCanvas: synchronous data URL isn't available; fall through to SVG.
+      }
+    } catch {
+      // fall through to SVG fallback
+    }
+  }
+
   const { inner, era } = buildSceneInner(character, W, H);
   const body = `${inner}
     <rect x="0" y="${H - 34}" width="${W}" height="34" fill="#000" opacity="0.45" />
@@ -396,4 +424,25 @@ export function captureSnapshot(character: Character, title: string): string {
       era.name,
     )} · ${Math.floor(character.age)}세 · ${escapeXml(character.name)}</text>`;
   return svgToDataUrl(svgWrap(body, era, W, H));
+}
+
+function drawTitleBar(
+  ctx: CanvasRenderingContext2D,
+  title: string,
+  era: Era,
+  character: Character,
+  W: number,
+  H: number,
+) {
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(0, H - 34, W, 34);
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillText(title, 8, H - 19);
+  ctx.fillStyle = "#ddeeff";
+  ctx.font = "10px sans-serif";
+  ctx.fillText(`${era.name} · ${Math.floor(character.age)}세 · ${character.name}`, 8, H - 6);
+  ctx.restore();
 }
