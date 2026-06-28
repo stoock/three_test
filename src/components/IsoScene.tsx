@@ -11,16 +11,17 @@ const H = 420;
 export default function IsoScene() {
   const character = useGameStore((s) => s.character);
 
-  // Only rebuild the SVG when something visible changes (integer age / tech),
-  // not on every sub-year frame.
+  // Only rebuild the SVG when something visible changes (integer age / tech /
+  // territory), not on every sub-year frame.
   const ageInt = character ? Math.floor(character.age) : 0;
   const techInt = character ? Math.floor(character.techLevel) : 0;
+  const territory = character?.territory ?? 0;
 
   const { inner, era } = useMemo(() => {
     if (!character) return { inner: "", era: getEra(0) };
-    return buildSceneInner(character, W, H, 7);
+    return buildSceneInner(character, W, H);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character?.name, ageInt, techInt]);
+  }, [character?.name, character?.seed, ageInt, techInt, territory]);
 
   if (!character) return null;
   const progress = eraProgress(character.techLevel);

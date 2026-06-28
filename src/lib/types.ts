@@ -54,7 +54,7 @@ export interface Era {
   description: string;
 }
 
-export type LogType = "birth" | "era" | "choice" | "milestone";
+export type LogType = "birth" | "era" | "choice" | "milestone" | "expand";
 
 export interface LogEntry {
   id: string;
@@ -78,6 +78,12 @@ export interface Character {
   techLevel: number;
   /** Counts important logged choices made so far. */
   choicesMade: number;
+  /** Unique world seed — guarantees no two lives unfold the same way. */
+  seed: number;
+  /** Chaotic "fortune" state in (0,1), evolved by a logistic map each year. */
+  chaos: number;
+  /** Side length of the explorable ground grid; grows as the realm expands. */
+  territory: number;
 }
 
 export type Speed = 0 | 1 | 5 | 25 | 100 | 1000;

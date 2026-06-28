@@ -102,6 +102,22 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: "immortal-sim-save",
+      version: 2,
+      migrate: (persisted: unknown) => {
+        const s = persisted as Partial<GameStore>;
+        // v1 saves lack seed/chaos/territory — backfill so they keep working.
+        if (s?.character && (s.character as Partial<typeof s.character>).seed === undefined) {
+          const ch = s.character as typeof s.character & {
+            seed?: number;
+            chaos?: number;
+            territory?: number;
+          };
+          ch.seed = (Math.floor(Math.random() * 0xffffffff) >>> 0) || 1;
+          ch.chaos = 0.5;
+          ch.territory = 5;
+        }
+        return s as GameStore;
+      },
       storage: createJSONStorage(() => throttledStorage()),
       partialize: (s) => ({
         character: s.character,

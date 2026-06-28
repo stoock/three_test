@@ -8,7 +8,8 @@ const TYPE_BADGE: Record<LogType, { label: string; cls: string }> = {
   birth: { label: "탄생", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
   era: { label: "시대", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300" },
   choice: { label: "선택", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
-  milestone: { label: "사건", cls: "bg-purple-500/15 text-purple-700 dark:text-purple-300" },
+  milestone: { label: "시련", cls: "bg-rose-500/15 text-rose-700 dark:text-rose-300" },
+  expand: { label: "확장", cls: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
 };
 
 function formatYear(y: number): string {

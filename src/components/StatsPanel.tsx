@@ -57,8 +57,22 @@ export default function StatsPanel() {
           <div className="text-black/50 dark:text-white/50">현재 시대</div>
         </div>
         <div className="rounded-lg bg-black/5 p-2 dark:bg-white/10">
+          <div className="font-bold">
+            {character.territory}×{character.territory} 칸
+          </div>
+          <div className="text-black/50 dark:text-white/50">영토</div>
+        </div>
+        <div className="rounded-lg bg-black/5 p-2 dark:bg-white/10">
           <div className="font-bold">{character.choicesMade}회</div>
-          <div className="text-black/50 dark:text-white/50">중요 선택</div>
+          <div className="text-black/50 dark:text-white/50">전략적 선택</div>
+        </div>
+        <div className="rounded-lg bg-black/5 p-2 dark:bg-white/10">
+          <div className="font-bold">
+            {character.chaos > 0.6 ? "🔆 호황" : character.chaos > 0.4 ? "⚖️ 평탄" : "🌧️ 침체"}
+          </div>
+          <div className="text-black/50 dark:text-white/50">
+            운명 변동 {Math.round(character.chaos * 100)}
+          </div>
         </div>
       </div>
 

@@ -1,21 +1,19 @@
 import type { Attributes, AttributeKey, Character, LogEntry } from "./types";
 import { getDisposition } from "./dispositions";
 import { getEra, ERA_SPAN } from "./eras";
-import { generateChoice, choiceReward } from "./events";
+import { resolveGame } from "./strategy";
 import { captureSnapshot } from "./scene";
+import { chaosR, logisticStep, makeRng } from "./chaos";
 
 export const BASE_YEARS_PER_SECOND = 0.4; // at speed = 1 (보통)
 export const MAX_LOG_ENTRIES = 120;
 
 const BASE_GROWTH = 0.12; // per year, every attribute
+const START_TERRITORY = 5;
+const MAX_TERRITORY = 13;
 
 function rngFrom(seed: number): () => number {
-  let s = Math.floor(seed) % 2147483647;
-  if (s <= 0) s += 2147483646;
-  return () => {
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
+  return makeRng(seed >>> 0);
 }
 
 function addAttrs(attrs: Attributes, delta: Partial<Attributes>): Attributes {
@@ -59,6 +57,7 @@ export function advance(character: Character, dtYears: number): AdvanceResult {
 
   let remaining = Math.min(dtYears, 4000); // safety clamp for very long gaps
   const STEP = 1;
+  const r = chaosR(c.seed);
 
   while (remaining > 0) {
     const dt = Math.min(STEP, remaining);
@@ -66,17 +65,23 @@ export function advance(character: Character, dtYears: number): AdvanceResult {
 
     const prevEraIndex = getEra(c.techLevel).index;
 
+    // --- chaotic fortune (logistic map) ---
+    // Evolve once per whole year so the orbit stays in its chaotic regime.
+    c.chaos = logisticStep(c.chaos, r);
+    const fortune = c.chaos; // (0,1): low = lean years, high = boom years
+    const growthMult = 0.55 + fortune * 1.1; // 0.55× .. 1.65× — never identical
+
     // --- growth ---
     const growth: Partial<Attributes> = {};
     (Object.keys(c.attributes) as AttributeKey[]).forEach((k) => {
       const bias = disp.growth[k] ?? 0;
-      growth[k] = (BASE_GROWTH + bias) * dt;
+      growth[k] = (BASE_GROWTH + bias) * growthMult * dt;
     });
     c.attributes = addAttrs(c.attributes, growth);
     c.age += dt;
-    c.techLevel += techRate(c) * dt;
+    c.techLevel += techRate(c) * (0.7 + fortune * 0.6) * dt;
 
-    // --- era advancement ---
+    // --- era advancement (+ possible territory expansion) ---
     const era = getEra(c.techLevel);
     if (era.index > prevEraIndex) {
       newLogs.push({
@@ -88,27 +93,59 @@ export function advance(character: Character, dtYears: number): AdvanceResult {
         description: `${Math.floor(c.age)}세, ${c.name}은(는) 새로운 시대의 문턱을 넘었다. ${era.description}`,
         snapshot: captureSnapshot(c, `${era.name} 진입`),
       });
+
+      // Meaningful condition for the realm to grow: a civilization score must
+      // clear a rising threshold, AND fortune must be on the realm's side.
+      if (c.territory < MAX_TERRITORY) {
+        const civScore =
+          c.attributes.knowledge +
+          c.attributes.creativity +
+          c.attributes.wealth +
+          c.attributes.charisma;
+        const threshold = expandThreshold(c.territory);
+        if (civScore >= threshold && fortune > 0.35) {
+          c.territory += 1;
+          newLogs.push({
+            id: uid(),
+            gameYear: Math.floor(c.age),
+            eraName: era.name,
+            type: "expand",
+            title: `영토 확장 (${c.territory - 1}→${c.territory})`,
+            description: `${era.name}, 문명 지수 ${Math.floor(
+              civScore,
+            )}이(가) 임계(${Math.floor(
+              threshold,
+            )})를 넘어섰다. 시류가 따라준 덕에 ${c.name}의 영역이 더 넓은 대지로 확장되었다.`,
+            snapshot: captureSnapshot(c, `영토 확장 → ${c.territory}`),
+          });
+        }
+      }
     }
 
-    // --- important choices ---
+    // --- important choices, resolved as game-theoretic decisions ---
     if (c.age >= nextChoiceThreshold(c)) {
-      const rand = rngFrom(Math.floor(c.age * 1000) + c.choicesMade * 7 + era.index * 13);
-      const choice = generateChoice(c, disp, era, rand);
-      c.attributes = addAttrs(c.attributes, choiceReward(disp));
+      const rand = rngFrom((Math.floor(c.age) * 2654435761) ^ (c.seed + c.choicesMade * 40503));
+      const result = resolveGame(c, disp, era, fortune, rand);
+      c.attributes = addAttrs(c.attributes, result.reward);
       c.choicesMade += 1;
       newLogs.push({
         id: uid(),
         gameYear: Math.floor(c.age),
         eraName: era.name,
-        type: "choice",
-        title: choice.title,
-        description: choice.description,
-        snapshot: captureSnapshot(c, choice.title),
+        type: result.setback ? "milestone" : "choice",
+        title: result.title,
+        description: result.description,
+        snapshot: captureSnapshot(c, result.title),
       });
     }
   }
 
   return { character: c, newLogs };
+}
+
+/** Civilization score the realm must reach for its next territorial expansion. */
+function expandThreshold(territory: number): number {
+  return 70 * Math.pow(1.85, territory - START_TERRITORY);
 }
 
 // We schedule choices by accumulated count: the Nth choice happens once age
@@ -125,12 +162,20 @@ function nextChoiceThreshold(c: Character): number {
 }
 
 export function createCharacter(name: string, disposition: Character["disposition"]): Character {
+  // A fresh, high-entropy seed per life — guarantees no two runs are alike.
+  const seed =
+    ((Date.now() >>> 0) ^ Math.floor(Math.random() * 0xffffffff) ^ (Math.random() * 0x9e3779b9)) >>> 0;
+  // Initial chaos state: sensitive dependence means this tiny value matters.
+  const chaos = 0.2 + makeRng(seed)() * 0.6;
   return {
     name: name.trim() || "이름없는 자",
     disposition,
     age: 0,
     techLevel: 0,
     choicesMade: 0,
+    seed,
+    chaos,
+    territory: START_TERRITORY,
     attributes: {
       knowledge: 5,
       strength: 5,
