@@ -62,6 +62,7 @@ export type LogType =
   | "story" // era / disposition flavour event (사건)
   | "rival" // relationship event with another being (인연)
   | "legend" // a lasting achievement / milestone (이정표)
+  | "wonder" // a great historical landmark built (불가사의)
   | "expand";
 
 export interface LogEntry {
@@ -107,6 +108,10 @@ export interface Character {
   rivals: Rival[];
   /** Ids of legendary milestones already achieved (so they fire once). */
   milestones: string[];
+  /** Ids of great wonders/landmarks built (rendered permanently in the city). */
+  wonders: string[];
+  /** Cumulative tech-rate multiplier granted by built wonders (default 1). */
+  techMult: number;
 }
 
 export type Speed = 0 | 1 | 5 | 25 | 100 | 1000;

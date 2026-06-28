@@ -8,6 +8,7 @@ import {
   MILESTONES,
   randomRivalName,
 } from "./events";
+import { nextWonder } from "./wonders";
 import { captureSnapshot } from "./scene";
 import { chaosR, logisticStep, makeRng } from "./chaos";
 
@@ -15,7 +16,7 @@ export const BASE_YEARS_PER_SECOND = 0.4; // at speed = 1 (보통)
 export const MAX_LOG_ENTRIES = 240;
 
 const BASE_GROWTH = 0.12; // per year, every attribute
-const START_TERRITORY = 5;
+const START_TERRITORY = 7;
 const MAX_TERRITORY = 13;
 const MAX_RIVALS = 5;
 
@@ -40,7 +41,7 @@ function techRate(character: Character): number {
   const disp = getDisposition(character.disposition);
   const a = character.attributes;
   const mind = a.knowledge * 0.6 + a.creativity * 0.4 + a.spirit * 0.15;
-  return (0.3 + mind / 220) * disp.techAffinity;
+  return (0.3 + mind / 220) * disp.techAffinity * (character.techMult ?? 1);
 }
 
 /** Years until the next event — grows with age but is capped so events never dry up. */
@@ -70,6 +71,7 @@ export function advance(character: Character, dtYears: number): AdvanceResult {
     attributes: { ...character.attributes },
     rivals: character.rivals.map((r) => ({ ...r })),
     milestones: [...character.milestones],
+    wonders: [...character.wonders],
   };
   const newLogs: LogEntry[] = [];
 
@@ -131,6 +133,19 @@ export function advance(character: Character, dtYears: number): AdvanceResult {
             threshold,
           )})를 넘어섰다. 시류가 따라준 덕에 ${c.name}의 영역이 더 넓은 대지로 확장되었다.`,
         );
+      }
+    }
+
+    // --- great wonders: built when the realm clears a wonder's conditions ---
+    {
+      const wrand = rngFrom((c.seed ^ 0x77de) + c.wonders.length * 6151 + Math.floor(c.age));
+      const w = nextWonder(c, era.index, wrand);
+      if (w) {
+        c.wonders.push(w.id);
+        if (w.effect.attrBonus) c.attributes = addAttrs(c.attributes, w.effect.attrBonus);
+        if (w.effect.techMult) c.techMult = (c.techMult ?? 1) * w.effect.techMult;
+        if (w.effect.territory) c.territory = Math.min(MAX_TERRITORY, c.territory + w.effect.territory);
+        log("wonder", `불가사의 건립: ${w.name}`, `${era.name}, ${Math.floor(c.age)}세. ${w.blurb}`);
       }
     }
 
@@ -215,6 +230,8 @@ export function createCharacter(name: string, disposition: Character["dispositio
     nextChoiceAge: 3,
     rivals: [],
     milestones: [],
+    wonders: [],
+    techMult: 1,
     attributes: {
       knowledge: 5,
       strength: 5,

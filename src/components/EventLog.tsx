@@ -12,6 +12,7 @@ const TYPE_BADGE: Record<LogType, { label: string; cls: string }> = {
   story: { label: "사건", cls: "bg-purple-500/15 text-purple-700 dark:text-purple-300" },
   rival: { label: "인연", cls: "bg-pink-500/15 text-pink-700 dark:text-pink-300" },
   legend: { label: "이정표", cls: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-300" },
+  wonder: { label: "불가사의", cls: "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300" },
   expand: { label: "확장", cls: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
 };
 
@@ -21,11 +22,12 @@ function formatYear(y: number): string {
   return `${(y / 1_000_000).toFixed(2)}백만세`;
 }
 
-type Filter = "all" | "legend" | "rival" | "story" | "choice";
+type Filter = "all" | "legend" | "wonder" | "rival" | "story" | "choice";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "전체" },
   { id: "legend", label: "이정표" },
+  { id: "wonder", label: "불가사의" },
   { id: "story", label: "사건" },
   { id: "choice", label: "선택" },
   { id: "rival", label: "인연" },

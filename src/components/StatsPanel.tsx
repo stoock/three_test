@@ -39,6 +39,15 @@ export default function StatsPanel() {
   const progress = eraProgress(character.techLevel);
   const maxAttr = Math.max(20, ...ATTR_ORDER.map((k) => character.attributes[k]));
 
+  const civ =
+    character.attributes.knowledge +
+    character.attributes.creativity +
+    character.attributes.wealth +
+    character.attributes.charisma;
+  const pop = Math.floor(civ * Math.pow(character.territory / 7, 1.6) * (1 + era.index * 0.4)) * 12;
+  const popStr =
+    pop >= 1_000_000 ? `${(pop / 1_000_000).toFixed(1)}M` : pop >= 1000 ? `${(pop / 1000).toFixed(0)}K` : `${pop}`;
+
   return (
     <div className="rounded-xl border border-black/10 bg-white/60 p-4 dark:border-white/10 dark:bg-white/5">
       <div className="flex items-center gap-3">
@@ -61,6 +70,14 @@ export default function StatsPanel() {
             {character.territory}×{character.territory} 칸
           </div>
           <div className="text-black/50 dark:text-white/50">영토</div>
+        </div>
+        <div className="rounded-lg bg-black/5 p-2 dark:bg-white/10">
+          <div className="font-bold">{popStr}</div>
+          <div className="text-black/50 dark:text-white/50">인구</div>
+        </div>
+        <div className="rounded-lg bg-black/5 p-2 dark:bg-white/10">
+          <div className="font-bold">🏛️ {character.wonders.length}</div>
+          <div className="text-black/50 dark:text-white/50">불가사의</div>
         </div>
         <div className="rounded-lg bg-black/5 p-2 dark:bg-white/10">
           <div className="font-bold">{character.choicesMade}회</div>

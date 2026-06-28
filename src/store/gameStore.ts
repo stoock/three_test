@@ -102,7 +102,7 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: "immortal-sim-save",
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown) => {
         const s = persisted as Partial<GameStore>;
         const ch = s?.character as
@@ -118,6 +118,9 @@ export const useGameStore = create<GameStore>()(
           if (ch.nextChoiceAge === undefined) ch.nextChoiceAge = Math.max(3, (ch.age as number) + 4);
           if (ch.rivals === undefined) ch.rivals = [];
           if (ch.milestones === undefined) ch.milestones = [];
+          // v3 → wonders / tech multiplier
+          if (ch.wonders === undefined) ch.wonders = [];
+          if (ch.techMult === undefined) ch.techMult = 1;
         }
         return s as GameStore;
       },

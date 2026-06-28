@@ -1,6 +1,7 @@
 import type { Character, Era } from "./types";
 import { getEra, eraProgress } from "./eras";
 import { fbm, makeRng } from "./chaos";
+import { getWonder, type Wonder, type Silhouette } from "./wonders";
 
 // ============================================================================
 // Voxel / Minecraft-style isometric renderer.
@@ -364,20 +365,51 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
       home = t;
     }
   }
-  const buildable = tiles.filter(
+  const distHome = (t: TileD) => Math.hypot(t.col - home.col, t.row - home.row);
+  let buildable = tiles.filter(
     (t) => (t.terrain === "grass" || t.terrain === "sand" || t.terrain === "forest") && !(t.col === home.col && t.row === home.row),
   );
-  for (let i = buildable.length - 1; i > 0; i--) {
-    const j = (rb() * (i + 1)) | 0;
-    [buildable[i], buildable[j]] = [buildable[j], buildable[i]];
+
+  // --- place built wonders on prominent land tiles near the city centre ---
+  const wonderPlacements: { w: Wonder; col: number; row: number }[] = [];
+  const screenWonders: Wonder[] = [];
+  {
+    const near = buildable.slice().sort((a, b) => distHome(a) - distHome(b));
+    let idx = 0;
+    for (const id of character.wonders) {
+      const w = getWonder(id);
+      if (!w) continue;
+      if (w.silhouette === "beam" || w.silhouette === "ring") {
+        screenWonders.push(w);
+        continue;
+      }
+      if (idx < near.length) {
+        const t = near[idx++];
+        wonderPlacements.push({ w, col: t.col, row: t.row });
+      }
+    }
   }
-  const density = Math.min(N * N - 1, 3 + Math.floor(character.techLevel / 55) + Math.floor(N / 2));
+  const wonderKey = new Set(wonderPlacements.map((p) => `${p.col},${p.row}`));
+  buildable = buildable.filter((t) => !wonderKey.has(`${t.col},${t.row}`));
+
+  // --- clustered placement near home + centre→edge height gradient ---
+  const maxLandDist = buildable.reduce((m, t) => Math.max(m, distHome(t)), 1);
+  buildable.sort((a, b) => distHome(a) + rb() * 2.2 - (distHome(b) + rb() * 2.2));
+  const landCount = tiles.filter((t) => t.terrain !== "water").length;
+  const density = Math.min(
+    buildable.length,
+    4 + Math.floor(character.techLevel / 45) + Math.floor(landCount * 0.45),
+  );
   const buildings: BuildingD[] = [];
   const builtKey = new Set<string>();
-  for (let i = 0; i < Math.min(density, buildable.length); i++) {
+  for (let i = 0; i < density; i++) {
     const t = buildable[i];
     builtKey.add(`${t.col},${t.row}`);
-    buildings.push({ col: t.col, row: t.row, floors: floorsFor(era, rb), seed: (t.col * 73 + t.row * 131) >>> 0 });
+    const dn = distHome(t) / maxLandDist; // 0 centre … 1 edge
+    const hMult = Math.max(0.4, 1.35 - dn);
+    let floors = Math.max(1, Math.round(floorsFor(era, rb) * hMult));
+    if (rb() < 0.12) floors = Math.round(floors * (1.5 + rb())); // occasional landmark spike
+    buildings.push({ col: t.col, row: t.row, floors, seed: ((t.col * 73 + t.row * 131) >>> 0) || 1 });
   }
 
   // fit-to-canvas (extents at S=1)
@@ -398,6 +430,10 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
   for (const b of buildings) {
     const t = tiles.find((x) => x.col === b.col && x.row === b.row)!;
     consider(b.col, b.row, t.layers + b.floors + 2, BASE_DEPTH);
+  }
+  for (const p of wonderPlacements) {
+    const t = tiles.find((x) => x.col === p.col && x.row === p.row)!;
+    consider(p.col, p.row, t.layers + 12, BASE_DEPTH); // wonders are tall — reserve headroom
   }
   const spanX = maxX - minX || 1;
   const spanY = maxY - minY || 1;
@@ -440,13 +476,22 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
       const m = terrainMats(t.terrain);
       drawColumn(ctx, top.x, top.y, SHW, SHH, SCH, t.layers, SDEPTH, m.top, m.sideTop, m.sideDeep);
     }
-    if (t.terrain === "forest" && !builtKey.has(`${t.col},${t.row}`)) {
+    const key = `${t.col},${t.row}`;
+    if (t.terrain === "forest" && !builtKey.has(key) && !wonderKey.has(key)) {
       const n = 1 + ((treeRng() * 2) | 0);
       for (let k = 0; k < n; k++) drawTree(ctx, top.x + (treeRng() - 0.5) * SHW * 0.7, top.y + (treeRng() - 0.5) * SHH * 0.7, S, era);
     }
-    const b = buildings.find((x) => x.col === t.col && x.row === t.row);
-    if (b) drawBuilding(ctx, gctx, top.x, top.y, SHW, SHH, SCH, b, era);
+    if (wonderKey.has(key)) {
+      const wp = wonderPlacements.find((p) => p.col === t.col && p.row === t.row)!;
+      drawWonder(ctx, gctx, top.x, top.y, SHW, SHH, SCH, wp.w, era);
+    } else {
+      const b = buildings.find((x) => x.col === t.col && x.row === t.row);
+      if (b) drawBuilding(ctx, gctx, top.x, top.y, SHW, SHH, SCH, b, era);
+    }
   }
+
+  // screen-space wonders (space elevator beam, orbital/Dyson ring)
+  for (const w of screenWonders) drawScreenWonder(ctx, gctx, w, era, W, H);
 
   const homeTop = project(home.col, home.row, home.layers);
 
@@ -548,57 +593,80 @@ function drawTree(ctx: Ctx, cx: number, cyTop: number, S: number, era: Era) {
 
 // ---- buildings ----
 function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number, shh: number, sch: number, b: BuildingD, era: Era) {
-  const rng = makeRng(b.seed ^ (era.index * 99991));
-  const bw = shw * 0.8;
-  const bh = shh * 0.8;
+  const rng = makeRng((b.seed ^ (era.index * 99991)) >>> 0);
+  const spec = buildingSpec(era, rng);
   const floors = b.floors;
-  const spec = buildingSpec(era);
+
+  // per-building footprint + brightness variety (seed-driven)
+  const fw = 0.6 + rng() * 0.32;
+  const fh = 0.6 + rng() * 0.32;
+  let bw = shw * fw;
+  let bh = shh * fh;
+  const bMul = 0.86 + (Math.round(rng() * 6) / 20); // {0.86..1.16} bucketed for cache reuse
+  const mirror = rng() < 0.5; // swap left/right wall shade to break repetition
+  const fL = (mirror ? F_RIGHT : F_LEFT) * bMul;
+  const fR = (mirror ? F_LEFT : F_RIGHT) * bMul;
+
+  // setback for tall buildings → stepped skyscraper silhouette
+  const setbackEvery = floors >= 6 ? 3 + ((rng() * 2) | 0) : 999;
 
   ctx.fillStyle = "rgba(0,0,0,0.28)";
   ctx.beginPath();
   ctx.ellipse(cx + bw * 0.35, cyTop + bh * 0.35, bw * 1.1, bh * 1.1, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  let w = bw;
+  let h = bh;
   for (let i = 0; i < floors; i++) {
+    if (i > 0 && i % setbackEvery === 0) {
+      w *= 0.82;
+      h *= 0.82;
+    }
     const yt = cyTop - (i + 1) * sch;
-    paintFace(ctx, getTex(spec.wall, F_LEFT), cx - bw, yt, bw, bh, 0, sch);
-    paintFace(ctx, getTex(spec.wall, F_RIGHT), cx, yt + bh, bw, -bh, 0, sch);
+    paintFace(ctx, getTex(spec.wall, fL), cx - w, yt, w, h, 0, sch);
+    paintFace(ctx, getTex(spec.wall, fR), cx, yt + h, w, -h, 0, sch);
+
     if (spec.windows) {
       const lit = makeWindowTex(b.seed + i, era);
-      paintFace(ctx, lit, cx - bw, yt, bw, bh, 0, sch);
-      paintFace(ctx, lit, cx, yt + bh, bw, -bh, 0, sch);
-      paintFace(gctx, lit, cx - bw, yt, bw, bh, 0, sch);
-      paintFace(gctx, lit, cx, yt + bh, bw, -bh, 0, sch);
+      paintFace(ctx, lit, cx - w, yt, w, h, 0, sch);
+      paintFace(ctx, lit, cx, yt + h, w, -h, 0, sch);
+      paintFace(gctx, lit, cx - w, yt, w, h, 0, sch);
+      paintFace(gctx, lit, cx, yt + h, w, -h, 0, sch);
+    } else {
+      // openings (doors/windows) so low-era buildings aren't blank boxes
+      const fac = getFacadeTex(i === 0);
+      paintFace(ctx, fac, cx - w, yt, w, h, 0, sch);
+      paintFace(ctx, fac, cx, yt + h, w, -h, 0, sch);
     }
   }
 
   const roofY = cyTop - floors * sch;
-  if (spec.roof === "pitch") drawPitchRoof(ctx, cx, roofY, bw, bh, sch * 0.9, spec.roofMat);
-  else paintFace(ctx, getTex(spec.roofMat, F_TOP), cx - bw, roofY, bw, -bh, bw, bh);
+  if (spec.roof === "pitch") drawPitchRoof(ctx, cx, roofY, w, h, sch * (0.65 + rng() * 0.7), spec.roofMat);
+  else paintFace(ctx, getTex(spec.roofMat, F_TOP), cx - w, roofY, w, -h, w, h);
 
   switch (era.structure) {
     case "temple":
       drawColumns(ctx, cx, cyTop, bw, sch * floors);
       break;
     case "keep":
-      drawCrenellations(ctx, cx, roofY, bw, bh);
+      drawCrenellations(ctx, cx, roofY, w, h);
       break;
     case "manor":
-      drawChimney(ctx, cx - bw * 0.4, roofY, sch, "tile_roof");
+      drawChimney(ctx, cx + (rng() - 0.5) * bw, roofY, sch * (0.8 + rng() * 0.6), "tile_roof");
       break;
     case "factory":
-      drawChimney(ctx, cx + bw * 0.3, roofY, sch * 1.8, "brick");
+      drawChimney(ctx, cx + bw * 0.3, roofY, sch * (1.5 + rng()), "brick");
+      if (rng() < 0.5) drawChimney(ctx, cx - bw * 0.3, roofY, sch * (1.2 + rng()), "brick");
       break;
     case "tower":
     case "arcology":
-      drawAntenna(ctx, gctx, cx, roofY, sch, era);
-      if (era.structure === "arcology") drawNeonEdges(ctx, gctx, cx, cyTop, bw, bh, sch * floors, era);
+      if (rng() < 0.7) drawAntenna(ctx, gctx, cx, roofY, sch, era);
+      if (era.structure === "arcology") drawNeonEdges(ctx, gctx, cx, cyTop, w, h, sch * floors, era);
       break;
     case "dome":
-      drawDome(ctx, gctx, cx, roofY, bw, bh, era);
+      drawDome(ctx, gctx, cx, roofY, w, h, era);
       break;
   }
-  void rng;
 }
 
 interface BSpec {
@@ -607,27 +675,71 @@ interface BSpec {
   roofMat: string;
   windows: boolean;
 }
-function buildingSpec(era: Era): BSpec {
-  switch (era.structure) {
-    case "hut":
-      return { wall: "planks", roof: "pitch", roofMat: "thatch", windows: false };
-    case "temple":
-      return { wall: "stone", roof: "flat", roofMat: "stone", windows: false };
-    case "keep":
-      return { wall: "stonebrick", roof: "flat", roofMat: "stonebrick", windows: false };
-    case "manor":
-      return { wall: "plaster", roof: "pitch", roofMat: "tile_roof", windows: false };
-    case "factory":
-      return { wall: "brick", roof: "flat", roofMat: "brick", windows: false };
-    case "tower":
-      return { wall: "glass", roof: "flat", roofMat: "metal", windows: true };
-    case "dome":
-      return { wall: "metal", roof: "flat", roofMat: "metal", windows: true };
-    case "arcology":
-      return { wall: "glass_neon", roof: "flat", roofMat: "metal", windows: true };
-    default:
-      return { wall: "stone", roof: "flat", roofMat: "stone", windows: false };
+// Per-era variant pools — same era now yields several distinct buildings.
+const SPEC_POOL: Record<string, BSpec[]> = {
+  hut: [
+    { wall: "planks", roof: "pitch", roofMat: "thatch", windows: false },
+    { wall: "log", roof: "pitch", roofMat: "thatch", windows: false },
+    { wall: "planks", roof: "pitch", roofMat: "tile_roof", windows: false },
+  ],
+  temple: [
+    { wall: "stone", roof: "flat", roofMat: "stone", windows: false },
+    { wall: "stone", roof: "pitch", roofMat: "tile_roof", windows: false },
+    { wall: "stonebrick", roof: "flat", roofMat: "stone", windows: false },
+  ],
+  keep: [
+    { wall: "stonebrick", roof: "flat", roofMat: "stonebrick", windows: false },
+    { wall: "stone", roof: "flat", roofMat: "stonebrick", windows: false },
+  ],
+  manor: [
+    { wall: "plaster", roof: "pitch", roofMat: "tile_roof", windows: false },
+    { wall: "brick", roof: "pitch", roofMat: "tile_roof", windows: false },
+    { wall: "plaster", roof: "pitch", roofMat: "thatch", windows: false },
+  ],
+  factory: [
+    { wall: "brick", roof: "flat", roofMat: "brick", windows: false },
+    { wall: "brick", roof: "flat", roofMat: "metal", windows: true },
+  ],
+  tower: [
+    { wall: "glass", roof: "flat", roofMat: "metal", windows: true },
+    { wall: "metal", roof: "flat", roofMat: "metal", windows: true },
+  ],
+  dome: [
+    { wall: "metal", roof: "flat", roofMat: "metal", windows: true },
+    { wall: "glass", roof: "flat", roofMat: "metal", windows: true },
+  ],
+  arcology: [
+    { wall: "glass_neon", roof: "flat", roofMat: "metal", windows: true },
+    { wall: "metal", roof: "flat", roofMat: "metal", windows: true },
+  ],
+};
+function buildingSpec(era: Era, rng: () => number): BSpec {
+  const pool = SPEC_POOL[era.structure] ?? SPEC_POOL.temple;
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+function getFacadeTex(withDoor: boolean): AnyCanvas {
+  const key = withDoor ? "facade_door" : "facade_win";
+  const cached = baseTexCache.get(key);
+  if (cached) return cached;
+  const made = makeCanvas(TS, TS)!;
+  const ctx = made.ctx;
+  const dark = "rgba(28,24,32,0.6)";
+  const sill = "rgba(255,255,255,0.12)";
+  for (let cy = 2; cy < TS - 3; cy += 5)
+    for (let cx = 2; cx < TS - 2; cx += 5) {
+      ctx.fillStyle = dark;
+      ctx.fillRect(cx, cy, 2, 3);
+      ctx.fillStyle = sill;
+      ctx.fillRect(cx, cy + 3, 2, 1);
+    }
+  if (withDoor) {
+    ctx.clearRect(6, 10, 4, 6);
+    ctx.fillStyle = "rgba(20,16,22,0.78)";
+    ctx.fillRect(6, 10, 4, 6);
   }
+  baseTexCache.set(key, made.canvas);
+  return made.canvas;
 }
 
 function makeWindowTex(seed: number, era: Era): AnyCanvas {
@@ -752,6 +864,168 @@ function drawNeonEdges(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, bw: numbe
     g.lineTo(cx, top + bh);
     g.lineTo(cx + bw, top);
     g.stroke();
+  }
+}
+
+// ============================================================================
+// Wonders / landmarks — distinctive silhouettes, larger than ordinary buildings
+// ============================================================================
+function prismPx(
+  ctx: Ctx,
+  cx: number,
+  cyTop: number,
+  hw: number,
+  hh: number,
+  height: number,
+  top: string,
+  left: string,
+  right: string,
+) {
+  // left & right faces then top diamond (solid colours)
+  fillQuad(ctx, [cx - hw, cyTop, cx, cyTop + hh, cx, cyTop + hh - height, cx - hw, cyTop - height], left);
+  fillQuad(ctx, [cx, cyTop + hh, cx + hw, cyTop, cx + hw, cyTop - height, cx, cyTop + hh - height], right);
+  fillQuad(ctx, [cx - hw, cyTop - height, cx, cyTop + hh - height, cx + hw, cyTop - height, cx, cyTop - hh - height], top);
+}
+
+function drawWonder(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number, shh: number, sch: number, w: Wonder, era: Era) {
+  const s = (w.footprint >= 2 ? 1.5 : 1.15); // wonders dwarf normal buildings
+  const hw = shw * s;
+  const hh = shh * s;
+  const ch = sch;
+  const accent = era.palette.accent;
+
+  // ground shadow
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath();
+  ctx.ellipse(cx + hw * 0.3, cyTop + hh * 0.3, hw * 1.2, hh * 1.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const sil: Silhouette = w.silhouette;
+  if (sil === "pyramid") {
+    const steps = 5;
+    for (let i = 0; i < steps; i++) {
+      const f = 1 - i / steps;
+      prismPx(ctx, cx, cyTop - i * ch * 0.9, hw * f, hh * f, ch * 0.9, mul("#d8c48c", 1.0), mul("#d8c48c", 0.8), mul("#d8c48c", 0.6));
+    }
+  } else if (sil === "henge") {
+    const n = 8;
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      const px2 = cx + Math.cos(a) * hw * 0.8;
+      const py2 = cyTop + Math.sin(a) * hh * 0.8;
+      prismPx(ctx, px2, py2, hw * 0.13, hh * 0.13, ch * 1.6, mul("#9a948a", 1), mul("#9a948a", 0.8), mul("#9a948a", 0.6));
+    }
+  } else if (sil === "colonnade") {
+    prismPx(ctx, cx, cyTop, hw, hh, ch * 0.6, mul("#e6e0d2", 1), mul("#e6e0d2", 0.82), mul("#e6e0d2", 0.64));
+    const top0 = cyTop - ch * 0.6;
+    for (let i = -3; i <= 3; i++) {
+      ctx.fillStyle = mul("#efe9da", i < 0 ? F_LEFT : F_RIGHT);
+      ctx.fillRect(cx + (i / 3) * hw * 0.8 - 2, top0 - ch * 1.6, 4, ch * 1.6);
+    }
+    // pediment
+    fillQuad(ctx, [cx - hw, top0 - ch * 1.6, cx + hw, top0 - ch * 1.6, cx, top0 - ch * 2.4], mul("#cfc7b4", 1));
+  } else if (sil === "arena") {
+    for (let i = 0; i < 3; i++) {
+      const f = 1 - i * 0.22;
+      ctx.fillStyle = mul("#cdbfa0", 1 - i * 0.12);
+      ctx.beginPath();
+      ctx.ellipse(cx, cyTop - i * ch * 0.7, hw * f, hh * f, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = mul("#9c8f74", 0.8);
+      ctx.beginPath();
+      ctx.ellipse(cx, cyTop - i * ch * 0.7 - ch * 0.35, hw * f * 0.7, hh * f * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (sil === "dome") {
+    prismPx(ctx, cx, cyTop, hw, hh, ch * 1.2, mul("#d8d2c4", 1), mul("#d8d2c4", 0.82), mul("#d8d2c4", 0.64));
+    const dy = cyTop - ch * 1.2;
+    ctx.fillStyle = mul(mix("#e8e2d4", accent, 0.15), 1);
+    ctx.beginPath();
+    ctx.ellipse(cx, dy + hh * 0.2, hw * 0.85, hw * 0.7, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(cx, dy - hw * 0.5, 3, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (sil === "spire") {
+    prismPx(ctx, cx, cyTop, hw * 0.8, hh * 0.8, ch * 2.2, mul("#b8b0a2", 1), mul("#b8b0a2", 0.82), mul("#b8b0a2", 0.62));
+    const t0 = cyTop - ch * 2.2;
+    // tall steeple
+    fillQuad(ctx, [cx - hw * 0.3, t0, cx + hw * 0.3, t0, cx, t0 - ch * 2.2], mul("#7a6e8e", 1));
+    // stained glass glow
+    gctx.fillStyle = accent;
+    gctx.fillRect(cx - 2, cyTop - ch * 1.6, 4, ch * 1.0);
+  } else if (sil === "hall") {
+    prismPx(ctx, cx, cyTop, hw, hh, ch * 1.4, mul("#bfd0dc", 1), mul("#9fb6c6", 0.85), mul("#88a0b2", 0.66));
+    // glow roof line
+    gctx.fillStyle = mix("#bfe8ff", accent, 0.3);
+    gctx.fillRect(cx - hw, cyTop - ch * 1.5, hw * 2, 3);
+  } else if (sil === "lattice") {
+    const topY = cyTop - ch * 4.2;
+    for (const g of [ctx]) {
+      g.strokeStyle = mul("#8a7a5a", 1);
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(cx - hw * 0.8, cyTop + hh);
+      g.lineTo(cx, topY);
+      g.lineTo(cx + hw * 0.8, cyTop + hh);
+      g.moveTo(cx - hw * 0.5, cyTop - ch * 1.5);
+      g.lineTo(cx + hw * 0.5, cyTop - ch * 1.5);
+      g.moveTo(cx - hw * 0.3, cyTop - ch * 2.8);
+      g.lineTo(cx + hw * 0.3, cyTop - ch * 2.8);
+      g.stroke();
+    }
+  } else if (sil === "rocket") {
+    prismPx(ctx, cx - hw * 0.5, cyTop, hw * 0.25, hh * 0.25, ch * 3, mul("#9aa2ae", 1), mul("#9aa2ae", 0.8), mul("#9aa2ae", 0.6)); // gantry
+    // rocket body
+    ctx.fillStyle = "#eef2f5";
+    ctx.fillRect(cx - 4, cyTop - ch * 3.2, 8, ch * 3.2);
+    fillQuad(ctx, [cx - 4, cyTop - ch * 3.2, cx + 4, cyTop - ch * 3.2, cx, cyTop - ch * 3.9], "#d05a4a");
+    gctx.fillStyle = "#ffd060";
+    gctx.beginPath();
+    gctx.ellipse(cx, cyTop + hh * 0.3, 7, 4, 0, 0, Math.PI * 2);
+    gctx.fill();
+  } else if (sil === "core") {
+    const cy = cyTop - ch * 1.5;
+    const r = hw * 1.0;
+    fillQuad(ctx, [cx, cy - r, cx + r, cy, cx, cy + r, cx - r, cy], mix("#5a3a8a", accent, 0.4));
+    for (const g of [ctx, gctx]) {
+      g.strokeStyle = accent;
+      g.lineWidth = g === gctx ? 4 : 2;
+      g.beginPath();
+      g.moveTo(cx, cy - r);
+      g.lineTo(cx + r, cy);
+      g.lineTo(cx, cy + r);
+      g.lineTo(cx - r, cy);
+      g.closePath();
+      g.moveTo(cx, cy - r);
+      g.lineTo(cx, cy + r);
+      g.moveTo(cx - r, cy);
+      g.lineTo(cx + r, cy);
+      g.stroke();
+    }
+  }
+}
+
+function drawScreenWonder(ctx: Ctx, gctx: Ctx, w: Wonder, era: Era, W: number, H: number) {
+  const accent = era.palette.accent;
+  if (w.silhouette === "beam") {
+    const x = W * 0.5;
+    const grad = ctx.createLinearGradient(x, 0, x, H);
+    grad.addColorStop(0, hexA(accent, 0.0));
+    grad.addColorStop(1, hexA(accent, 0.5));
+    ctx.fillStyle = grad;
+    ctx.fillRect(x - 4, 0, 8, H);
+    gctx.fillStyle = hexA(accent, 0.8);
+    gctx.fillRect(x - 3, 0, 6, H);
+  } else if (w.silhouette === "ring") {
+    for (const g of [ctx, gctx]) {
+      g.strokeStyle = g === gctx ? hexA(accent, 0.9) : hexA(accent, 0.5);
+      g.lineWidth = g === gctx ? 6 : 3;
+      g.beginPath();
+      g.ellipse(W * 0.5, H * 0.32, W * 0.42, H * 0.16, 0.2, Math.PI * 1.05, Math.PI * 1.95);
+      g.stroke();
+    }
   }
 }
 

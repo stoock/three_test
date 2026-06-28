@@ -244,4 +244,16 @@ export const MILESTONES: Milestone[] = [
     title: "백 번의 갈림길",
     text: (c) => `${c.name}은(는) 백 번의 운명적 선택을 거쳐 단단해졌다.`,
   },
+  {
+    id: "wonders-3",
+    test: (c) => c.wonders.length >= 3,
+    title: "위대한 건설자",
+    text: (c) => `${c.name}의 도시에 세 개의 불가사의가 우뚝 섰다. 후세가 그 위용을 우러른다.`,
+  },
+  {
+    id: "wonders-6",
+    test: (c) => c.wonders.length >= 6,
+    title: "시대를 짓는 손",
+    text: (c) => `여섯 불가사의가 한 도시에 모였다. ${c.name}의 문명은 곧 경이 그 자체다.`,
+  },
 ];
