@@ -54,7 +54,15 @@ export interface Era {
   description: string;
 }
 
-export type LogType = "birth" | "era" | "choice" | "milestone" | "expand";
+export type LogType =
+  | "birth"
+  | "era"
+  | "choice" // a strategic game won
+  | "setback" // a strategic game lost (시련)
+  | "story" // era / disposition flavour event (사건)
+  | "rival" // relationship event with another being (인연)
+  | "legend" // a lasting achievement / milestone (이정표)
+  | "expand";
 
 export interface LogEntry {
   id: string;
@@ -66,6 +74,15 @@ export interface LogEntry {
   description: string;
   /** SVG data URL snapshot captured at the moment of the event. */
   snapshot: string;
+}
+
+export interface Rival {
+  name: string;
+  disposition: DispositionId;
+  /** Relationship from -100 (숙적) to +100 (벗). */
+  affinity: number;
+  /** Tit-for-tat memory: did they cooperate last encounter? */
+  lastCooperated: boolean;
 }
 
 export interface Character {
@@ -84,6 +101,12 @@ export interface Character {
   chaos: number;
   /** Side length of the explorable ground grid; grows as the realm expands. */
   territory: number;
+  /** Age at which the next important event fires (O(1) scheduling). */
+  nextChoiceAge: number;
+  /** Recurring acquaintances the immortal plays repeated games against. */
+  rivals: Rival[];
+  /** Ids of legendary milestones already achieved (so they fire once). */
+  milestones: string[];
 }
 
 export type Speed = 0 | 1 | 5 | 25 | 100 | 1000;

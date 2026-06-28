@@ -8,7 +8,10 @@ const TYPE_BADGE: Record<LogType, { label: string; cls: string }> = {
   birth: { label: "탄생", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
   era: { label: "시대", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300" },
   choice: { label: "선택", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
-  milestone: { label: "시련", cls: "bg-rose-500/15 text-rose-700 dark:text-rose-300" },
+  setback: { label: "시련", cls: "bg-rose-500/15 text-rose-700 dark:text-rose-300" },
+  story: { label: "사건", cls: "bg-purple-500/15 text-purple-700 dark:text-purple-300" },
+  rival: { label: "인연", cls: "bg-pink-500/15 text-pink-700 dark:text-pink-300" },
+  legend: { label: "이정표", cls: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-300" },
   expand: { label: "확장", cls: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
 };
 
@@ -18,11 +21,30 @@ function formatYear(y: number): string {
   return `${(y / 1_000_000).toFixed(2)}백만세`;
 }
 
+type Filter = "all" | "legend" | "rival" | "story" | "choice";
+
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "전체" },
+  { id: "legend", label: "이정표" },
+  { id: "story", label: "사건" },
+  { id: "choice", label: "선택" },
+  { id: "rival", label: "인연" },
+];
+
 export default function EventLog() {
   const log = useGameStore((s) => s.log);
   const [open, setOpen] = useState<LogEntry | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
 
-  const entries = [...log].reverse();
+  const entries = [...log]
+    .reverse()
+    .filter((e) =>
+      filter === "all"
+        ? true
+        : filter === "choice"
+          ? e.type === "choice" || e.type === "setback"
+          : e.type === filter,
+    );
 
   return (
     <div className="rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-white/5">
@@ -31,6 +53,21 @@ export default function EventLog() {
         <p className="text-[11px] text-black/50 dark:text-white/50">
           모든 중요한 순간이 사진과 함께 기록됩니다
         </p>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+                filter === f.id
+                  ? "bg-black text-white dark:bg-white dark:text-black"
+                  : "bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="max-h-[420px] space-y-3 overflow-y-auto p-3">

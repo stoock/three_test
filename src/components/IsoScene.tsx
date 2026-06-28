@@ -43,6 +43,19 @@ export default function IsoScene() {
         <g dangerouslySetInnerHTML={{ __html: inner }} />
       </svg>
 
+      {/* live "weather" tint driven by the chaotic fortune state */}
+      <div
+        className="pointer-events-none absolute inset-0 transition-colors duration-700"
+        style={{
+          background:
+            character.chaos < 0.4
+              ? `rgba(30,41,90,${(0.4 - character.chaos) * 0.9})` // 침체: cold gloom
+              : character.chaos > 0.6
+                ? `rgba(255,196,90,${(character.chaos - 0.6) * 0.5})` // 호황: warm glow
+                : "transparent",
+        }}
+      />
+
       <div className="pointer-events-none absolute left-0 top-0 m-3 rounded-lg bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
         <div className="text-sm font-bold">{era.name}</div>
         <div className="text-xs opacity-80">{era.englishName}</div>

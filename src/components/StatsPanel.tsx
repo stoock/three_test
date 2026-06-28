@@ -89,6 +89,43 @@ export default function StatsPanel() {
         </div>
       </div>
 
+      {/* chaotic fortune gauge — visualises the logistic-map state driving divergence */}
+      <div className="mt-3">
+        <div className="mb-1 flex justify-between text-[11px] text-black/50 dark:text-white/50">
+          <span>운명의 흐름 (카오스)</span>
+          <span>{character.chaos > 0.6 ? "격동·호황" : character.chaos > 0.4 ? "평온" : "침체"}</span>
+        </div>
+        <div className="relative h-2 overflow-hidden rounded-full bg-gradient-to-r from-slate-500 via-amber-300 to-emerald-400">
+          <div
+            className="absolute top-1/2 h-3 w-1.5 -translate-y-1/2 rounded-full bg-black shadow ring-2 ring-white dark:bg-white dark:ring-black"
+            style={{ left: `calc(${character.chaos * 100}% - 3px)` }}
+          />
+        </div>
+      </div>
+
+      {character.rivals.length > 0 && (
+        <div className="mt-3 rounded-lg bg-black/5 p-2 text-[11px] dark:bg-white/10">
+          <div className="mb-1 font-semibold text-black/60 dark:text-white/60">인연</div>
+          <div className="flex flex-wrap gap-1.5">
+            {character.rivals.map((r) => (
+              <span
+                key={r.name}
+                className={`rounded-full px-2 py-0.5 ${
+                  r.affinity >= 50
+                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                    : r.affinity <= -50
+                      ? "bg-rose-500/15 text-rose-700 dark:text-rose-300"
+                      : "bg-black/5 dark:bg-white/10"
+                }`}
+                title={`호감도 ${r.affinity}`}
+              >
+                {r.affinity >= 50 ? "🤝" : r.affinity <= -50 ? "⚔️" : "·"} {r.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 space-y-2">
         {ATTR_ORDER.map((k) => (
           <div key={k}>

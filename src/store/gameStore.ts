@@ -102,19 +102,22 @@ export const useGameStore = create<GameStore>()(
     }),
     {
       name: "immortal-sim-save",
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown) => {
         const s = persisted as Partial<GameStore>;
-        // v1 saves lack seed/chaos/territory — backfill so they keep working.
-        if (s?.character && (s.character as Partial<typeof s.character>).seed === undefined) {
-          const ch = s.character as typeof s.character & {
-            seed?: number;
-            chaos?: number;
-            territory?: number;
-          };
-          ch.seed = (Math.floor(Math.random() * 0xffffffff) >>> 0) || 1;
-          ch.chaos = 0.5;
-          ch.territory = 5;
+        const ch = s?.character as
+          | (NonNullable<GameStore["character"]> & Record<string, unknown>)
+          | null
+          | undefined;
+        if (ch) {
+          // v1 → seed/chaos/territory
+          if (ch.seed === undefined) ch.seed = (Math.floor(Math.random() * 0xffffffff) >>> 0) || 1;
+          if (ch.chaos === undefined) ch.chaos = 0.5;
+          if (ch.territory === undefined) ch.territory = 5;
+          // v2 → event scheduling, rivals, milestones
+          if (ch.nextChoiceAge === undefined) ch.nextChoiceAge = Math.max(3, (ch.age as number) + 4);
+          if (ch.rivals === undefined) ch.rivals = [];
+          if (ch.milestones === undefined) ch.milestones = [];
         }
         return s as GameStore;
       },
