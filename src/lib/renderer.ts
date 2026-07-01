@@ -1,7 +1,8 @@
 import type { Character, Era } from "./types";
 import { getEra, eraProgress } from "./eras";
 import { fbm, makeRng } from "./chaos";
-import { getWonder, type Wonder, type Silhouette } from "./wonders";
+import { getWonder, type Wonder } from "./wonders";
+import { getSpriteEntry, getSpriteImage, getVariantsForStructure } from "./sprites";
 
 // ============================================================================
 // Voxel / Minecraft-style isometric renderer.
@@ -592,231 +593,105 @@ function drawTree(ctx: Ctx, cx: number, cyTop: number, S: number, era: Era) {
 }
 
 // ---- buildings ----
-function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number, shh: number, sch: number, b: BuildingD, era: Era) {
-  const rng = makeRng((b.seed ^ (era.index * 99991)) >>> 0);
-  const spec = buildingSpec(era, rng);
-  const floors = b.floors;
+function drawSpriteFootprint(
+  ctx: Ctx,
+  img: HTMLCanvasElement | HTMLImageElement,
+  cx: number,
+  baseY: number,
+  targetW: number,
+  aspect: number, // pxH / pxW of the source image, preserved to avoid distortion
+) {
+  const targetH = targetW * aspect;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, cx - targetW / 2, baseY - targetH, targetW, targetH);
+  return targetH;
+}
 
-  // per-building footprint + brightness variety (seed-driven)
-  const fw = 0.6 + rng() * 0.32;
-  const fh = 0.6 + rng() * 0.32;
-  let bw = shw * fw;
-  let bh = shh * fh;
-  const bMul = 0.86 + (Math.round(rng() * 6) / 20); // {0.86..1.16} bucketed for cache reuse
-  const mirror = rng() < 0.5; // swap left/right wall shade to break repetition
-  const fL = (mirror ? F_RIGHT : F_LEFT) * bMul;
-  const fR = (mirror ? F_LEFT : F_RIGHT) * bMul;
-
-  // setback for tall buildings → stepped skyscraper silhouette
-  const setbackEvery = floors >= 6 ? 3 + ((rng() * 2) | 0) : 999;
-
+function groundShadow(ctx: Ctx, cx: number, baseY: number, w: number) {
   ctx.fillStyle = "rgba(0,0,0,0.28)";
   ctx.beginPath();
-  ctx.ellipse(cx + bw * 0.35, cyTop + bh * 0.35, bw * 1.1, bh * 1.1, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx + w * 0.12, baseY + w * 0.1, w * 0.55, w * 0.2, 0, 0, Math.PI * 2);
   ctx.fill();
+}
 
-  let w = bw;
-  let h = bh;
-  for (let i = 0; i < floors; i++) {
-    if (i > 0 && i % setbackEvery === 0) {
-      w *= 0.82;
-      h *= 0.82;
-    }
-    const yt = cyTop - (i + 1) * sch;
-    paintFace(ctx, getTex(spec.wall, fL), cx - w, yt, w, h, 0, sch);
-    paintFace(ctx, getTex(spec.wall, fR), cx, yt + h, w, -h, 0, sch);
+// Towers/arcologies are baked whole at discrete floor-count buckets (see
+// scripts/bake-sprites) rather than stacked at runtime — stacking flat 2D
+// floor slices always left each slice's own top-face diamond visible above
+// the next one, since 2D layering can't occlude the way real 3D geometry
+// does. A whole pre-baked tower sidesteps that entirely.
+const TOWER_STRUCTURES = new Set(["tower", "arcology"]);
 
-    if (spec.windows) {
-      const lit = makeWindowTex(b.seed + i, era);
-      paintFace(ctx, lit, cx - w, yt, w, h, 0, sch);
-      paintFace(ctx, lit, cx, yt + h, w, -h, 0, sch);
-      paintFace(gctx, lit, cx - w, yt, w, h, 0, sch);
-      paintFace(gctx, lit, cx, yt + h, w, -h, 0, sch);
-    } else {
-      // openings (doors/windows) so low-era buildings aren't blank boxes
-      const fac = getFacadeTex(i === 0);
-      paintFace(ctx, fac, cx - w, yt, w, h, 0, sch);
-      paintFace(ctx, fac, cx, yt + h, w, -h, 0, sch);
+function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number, shh: number, sch: number, b: BuildingD, era: Era) {
+  const rng = makeRng((b.seed ^ (era.index * 99991)) >>> 0);
+  const structure = era.structure;
+  const sizeMul = 0.88 + rng() * 0.42;
+
+  if (TOWER_STRUCTURES.has(structure)) {
+    const variants = getVariantsForStructure(structure, "building-single" as const);
+    if (variants.length === 0) return;
+    // pick the baked floor-count bucket closest to what the sim wants
+    let chosen = variants[0];
+    let bestDiff = Infinity;
+    for (const v of variants) {
+      const diff = Math.abs((v.floors ?? 0) - b.floors);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        chosen = v;
+      }
     }
+    const img = getSpriteImage(chosen.id);
+    if (!img) return;
+
+    const targetW = shw * (0.9 + sizeMul * 0.5);
+    groundShadow(ctx, cx, cyTop, targetW);
+    const aspect = chosen.pxH / chosen.pxW;
+    // the body sprite already has its lit windows baked in with real
+    // lighting — only the (blurred) bloom layer needs a separate pass.
+    drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect);
+
+    const glow = getSpriteImage(`${chosen.id}-glow`);
+    if (glow) {
+      gctx.save();
+      gctx.globalAlpha = 0.4;
+      drawSpriteFootprint(gctx, glow, cx, cyTop, targetW, aspect);
+      gctx.restore();
+    }
+
+    const roofY = cyTop - targetW * aspect;
+    if (rng() < 0.4) drawAntenna(ctx, gctx, cx, roofY, sch, era);
+    if (structure === "arcology") drawNeonEdges(ctx, gctx, cx, cyTop, targetW / 2, (targetW / 2) * (shh / shw), targetW * aspect, era);
+    return;
   }
 
-  const roofY = cyTop - floors * sch;
-  if (spec.roof === "pitch") drawPitchRoof(ctx, cx, roofY, w, h, sch * (0.65 + rng() * 0.7), spec.roofMat);
-  else paintFace(ctx, getTex(spec.roofMat, F_TOP), cx - w, roofY, w, -h, w, h);
+  // single, fully pre-baked building
+  const variants = getVariantsForStructure(structure, "building-single");
+  if (variants.length === 0) return;
+  const tall = b.floors >= tallThreshold(structure);
+  const pool = variants.filter((v) => v.tall === tall);
+  const chosen = (pool.length > 0 ? pool : variants)[Math.floor(rng() * (pool.length > 0 ? pool.length : variants.length))];
+  const img = getSpriteImage(chosen.id);
+  if (!img) return;
 
-  switch (era.structure) {
+  const targetW = shw * (1.0 + sizeMul * 0.45);
+  groundShadow(ctx, cx, cyTop, targetW);
+  drawSpriteFootprint(ctx, img, cx, cyTop, targetW, chosen.pxH / chosen.pxW);
+}
+
+function tallThreshold(structure: string): number {
+  switch (structure) {
+    case "hut":
+      return 6;
     case "temple":
-      drawColumns(ctx, cx, cyTop, bw, sch * floors);
-      break;
+      return 4;
     case "keep":
-      drawCrenellations(ctx, cx, roofY, w, h);
-      break;
+      return 6;
     case "manor":
-      drawChimney(ctx, cx + (rng() - 0.5) * bw, roofY, sch * (0.8 + rng() * 0.6), "tile_roof");
-      break;
+      return 5;
     case "factory":
-      drawChimney(ctx, cx + bw * 0.3, roofY, sch * (1.5 + rng()), "brick");
-      if (rng() < 0.5) drawChimney(ctx, cx - bw * 0.3, roofY, sch * (1.2 + rng()), "brick");
-      break;
-    case "tower":
-    case "arcology":
-      if (rng() < 0.7) drawAntenna(ctx, gctx, cx, roofY, sch, era);
-      if (era.structure === "arcology") drawNeonEdges(ctx, gctx, cx, cyTop, w, h, sch * floors, era);
-      break;
-    case "dome":
-      drawDome(ctx, gctx, cx, roofY, w, h, era);
-      break;
-  }
-}
-
-interface BSpec {
-  wall: string;
-  roof: "pitch" | "flat";
-  roofMat: string;
-  windows: boolean;
-}
-// Per-era variant pools — same era now yields several distinct buildings.
-const SPEC_POOL: Record<string, BSpec[]> = {
-  hut: [
-    { wall: "planks", roof: "pitch", roofMat: "thatch", windows: false },
-    { wall: "log", roof: "pitch", roofMat: "thatch", windows: false },
-    { wall: "planks", roof: "pitch", roofMat: "tile_roof", windows: false },
-  ],
-  temple: [
-    { wall: "stone", roof: "flat", roofMat: "stone", windows: false },
-    { wall: "stone", roof: "pitch", roofMat: "tile_roof", windows: false },
-    { wall: "stonebrick", roof: "flat", roofMat: "stone", windows: false },
-  ],
-  keep: [
-    { wall: "stonebrick", roof: "flat", roofMat: "stonebrick", windows: false },
-    { wall: "stone", roof: "flat", roofMat: "stonebrick", windows: false },
-  ],
-  manor: [
-    { wall: "plaster", roof: "pitch", roofMat: "tile_roof", windows: false },
-    { wall: "brick", roof: "pitch", roofMat: "tile_roof", windows: false },
-    { wall: "plaster", roof: "pitch", roofMat: "thatch", windows: false },
-  ],
-  factory: [
-    { wall: "brick", roof: "flat", roofMat: "brick", windows: false },
-    { wall: "brick", roof: "flat", roofMat: "metal", windows: true },
-  ],
-  tower: [
-    { wall: "glass", roof: "flat", roofMat: "metal", windows: true },
-    { wall: "metal", roof: "flat", roofMat: "metal", windows: true },
-  ],
-  dome: [
-    { wall: "metal", roof: "flat", roofMat: "metal", windows: true },
-    { wall: "glass", roof: "flat", roofMat: "metal", windows: true },
-  ],
-  arcology: [
-    { wall: "glass_neon", roof: "flat", roofMat: "metal", windows: true },
-    { wall: "metal", roof: "flat", roofMat: "metal", windows: true },
-  ],
-};
-function buildingSpec(era: Era, rng: () => number): BSpec {
-  const pool = SPEC_POOL[era.structure] ?? SPEC_POOL.temple;
-  return pool[Math.floor(rng() * pool.length)];
-}
-
-function getFacadeTex(withDoor: boolean): AnyCanvas {
-  const key = withDoor ? "facade_door" : "facade_win";
-  const cached = baseTexCache.get(key);
-  if (cached) return cached;
-  const made = makeCanvas(TS, TS)!;
-  const ctx = made.ctx;
-  const dark = "rgba(28,24,32,0.6)";
-  const sill = "rgba(255,255,255,0.12)";
-  for (let cy = 2; cy < TS - 3; cy += 5)
-    for (let cx = 2; cx < TS - 2; cx += 5) {
-      ctx.fillStyle = dark;
-      ctx.fillRect(cx, cy, 2, 3);
-      ctx.fillStyle = sill;
-      ctx.fillRect(cx, cy + 3, 2, 1);
-    }
-  if (withDoor) {
-    ctx.clearRect(6, 10, 4, 6);
-    ctx.fillStyle = "rgba(20,16,22,0.78)";
-    ctx.fillRect(6, 10, 4, 6);
-  }
-  baseTexCache.set(key, made.canvas);
-  return made.canvas;
-}
-
-function makeWindowTex(seed: number, era: Era): AnyCanvas {
-  const key = `win${seed % 64}_${era.index >= 8 ? "n" : "d"}`;
-  const cached = baseTexCache.get(key);
-  if (cached) return cached;
-  const made = makeCanvas(TS, TS)!;
-  const ctx = made.ctx;
-  const r = makeRng(seed + 1);
-  const lit = era.index >= 8 ? (r() > 0.5 ? "#ff5ad8" : "#5af0ff") : r() > 0.5 ? "#ffd98a" : "#ffffee";
-  for (let cy = 0; cy < TS; cy += 5)
-    for (let cx = 0; cx < TS; cx += 5)
-      if (r() > 0.45) for (let y = 1; y < 4; y++) for (let x = 1; x < 4; x++) px(ctx, cx + x, cy + y, lit);
-  baseTexCache.set(key, made.canvas);
-  return made.canvas;
-}
-
-function matColor(mat: string): string {
-  switch (mat) {
-    case "thatch":
-      return "#caa242";
-    case "tile_roof":
-      return "#a8432f";
-    case "stone":
-      return "#8f877b";
-    case "stonebrick":
-      return "#7f7a70";
-    case "metal":
-      return "#aab2be";
-    case "brick":
-      return "#9c4a38";
+      return 6;
     default:
-      return "#999999";
+      return 3;
   }
-}
-
-function drawPitchRoof(ctx: Ctx, cx: number, roofY: number, bw: number, bh: number, height: number, mat: string) {
-  const peakY = roofY - height;
-  const base = matColor(mat);
-  fillQuad(ctx, [cx - bw, roofY, cx, roofY + bh, cx, peakY], mul(base, F_LEFT));
-  fillQuad(ctx, [cx, roofY + bh, cx + bw, roofY, cx, peakY], mul(base, F_RIGHT));
-  fillQuad(ctx, [cx - bw, roofY, cx, peakY, cx + bw, roofY, cx, roofY - bh * 0.2], mul(base, 1.05));
-  ctx.strokeStyle = mul(base, 1.2);
-  ctx.lineWidth = Math.max(1, bw * 0.08);
-  ctx.beginPath();
-  ctx.moveTo(cx, peakY);
-  ctx.lineTo(cx, roofY + bh);
-  ctx.stroke();
-}
-
-function drawColumns(ctx: Ctx, cx: number, cyTop: number, bw: number, height: number) {
-  const col = "#e6e0d2";
-  for (const dx of [-bw * 0.6, -bw * 0.2, bw * 0.2, bw * 0.6]) {
-    ctx.fillStyle = mul(col, dx < 0 ? F_LEFT : F_RIGHT);
-    ctx.fillRect(cx + dx - 1.5, cyTop - height, 3, height);
-  }
-}
-
-function drawCrenellations(ctx: Ctx, cx: number, roofY: number, bw: number, bh: number) {
-  const m = "#7f7a70";
-  const n = 4;
-  for (let i = 0; i <= n; i++) {
-    if (i % 2 !== 0) continue;
-    const tt = i / n;
-    const x = cx - bw + tt * 2 * bw;
-    const y = roofY + (tt - 0.5) * 2 * bh;
-    ctx.fillStyle = mul(m, F_TOP);
-    ctx.fillRect(x - 2, y - 6, 4, 6);
-  }
-}
-
-function drawChimney(ctx: Ctx, cx: number, roofY: number, h: number, mat: string) {
-  const w = 5;
-  ctx.fillStyle = mul(matColor(mat), F_LEFT);
-  ctx.fillRect(cx - w / 2, roofY - h, w, h);
-  ctx.fillStyle = mul(matColor(mat), F_RIGHT);
-  ctx.fillRect(cx, roofY - h, w / 2, h);
 }
 
 function drawAntenna(ctx: Ctx, gctx: Ctx, cx: number, roofY: number, sch: number, era: Era) {
@@ -837,20 +712,6 @@ function drawAntenna(ctx: Ctx, gctx: Ctx, cx: number, roofY: number, sch: number
   gctx.fill();
 }
 
-function drawDome(ctx: Ctx, gctx: Ctx, cx: number, roofY: number, bw: number, bh: number, era: Era) {
-  ctx.fillStyle = mul("#cdd8e6", 0.9);
-  ctx.beginPath();
-  ctx.ellipse(cx, roofY + bh * 0.2, bw * 0.9, bw * 0.6, 0, Math.PI, 0);
-  ctx.fill();
-  for (const g of [ctx, gctx]) {
-    g.strokeStyle = era.palette.accent;
-    g.lineWidth = g === gctx ? 3 : 2;
-    g.beginPath();
-    g.ellipse(cx, roofY + bh * 0.2, bw * 0.9, bw * 0.28, 0, Math.PI, 0);
-    g.stroke();
-  }
-}
-
 function drawNeonEdges(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, bw: number, bh: number, totalH: number, era: Era) {
   const c = era.palette.accent;
   const top = cyTop - totalH;
@@ -868,143 +729,27 @@ function drawNeonEdges(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, bw: numbe
 }
 
 // ============================================================================
-// Wonders / landmarks — distinctive silhouettes, larger than ordinary buildings
+// Wonders / landmarks — pre-baked low-poly monuments, larger than ordinary
+// buildings, drawn as a single sprite with a soft ambient glow pass.
 // ============================================================================
-function prismPx(
-  ctx: Ctx,
-  cx: number,
-  cyTop: number,
-  hw: number,
-  hh: number,
-  height: number,
-  top: string,
-  left: string,
-  right: string,
-) {
-  // left & right faces then top diamond (solid colours)
-  fillQuad(ctx, [cx - hw, cyTop, cx, cyTop + hh, cx, cyTop + hh - height, cx - hw, cyTop - height], left);
-  fillQuad(ctx, [cx, cyTop + hh, cx + hw, cyTop, cx + hw, cyTop - height, cx, cyTop + hh - height], right);
-  fillQuad(ctx, [cx - hw, cyTop - height, cx, cyTop + hh - height, cx + hw, cyTop - height, cx, cyTop - hh - height], top);
-}
-
 function drawWonder(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number, shh: number, sch: number, w: Wonder, era: Era) {
-  const s = (w.footprint >= 2 ? 1.5 : 1.15); // wonders dwarf normal buildings
-  const hw = shw * s;
-  const hh = shh * s;
-  const ch = sch;
-  const accent = era.palette.accent;
+  void shh;
+  void sch;
+  void era;
+  const entry = getSpriteEntry(`wonder-${w.id}`);
+  const img = getSpriteImage(`wonder-${w.id}`);
+  if (!entry || !img) return;
 
-  // ground shadow
-  ctx.fillStyle = "rgba(0,0,0,0.3)";
-  ctx.beginPath();
-  ctx.ellipse(cx + hw * 0.3, cyTop + hh * 0.3, hw * 1.2, hh * 1.2, 0, 0, Math.PI * 2);
-  ctx.fill();
+  const targetW = shw * (w.footprint >= 2 ? 3.2 : 2.4);
+  groundShadow(ctx, cx, cyTop, targetW * 1.15);
+  const aspect = entry.pxH / entry.pxW;
+  drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect);
 
-  const sil: Silhouette = w.silhouette;
-  if (sil === "pyramid") {
-    const steps = 5;
-    for (let i = 0; i < steps; i++) {
-      const f = 1 - i / steps;
-      prismPx(ctx, cx, cyTop - i * ch * 0.9, hw * f, hh * f, ch * 0.9, mul("#d8c48c", 1.0), mul("#d8c48c", 0.8), mul("#d8c48c", 0.6));
-    }
-  } else if (sil === "henge") {
-    const n = 8;
-    for (let k = 0; k < n; k++) {
-      const a = (k / n) * Math.PI * 2;
-      const px2 = cx + Math.cos(a) * hw * 0.8;
-      const py2 = cyTop + Math.sin(a) * hh * 0.8;
-      prismPx(ctx, px2, py2, hw * 0.13, hh * 0.13, ch * 1.6, mul("#9a948a", 1), mul("#9a948a", 0.8), mul("#9a948a", 0.6));
-    }
-  } else if (sil === "colonnade") {
-    prismPx(ctx, cx, cyTop, hw, hh, ch * 0.6, mul("#e6e0d2", 1), mul("#e6e0d2", 0.82), mul("#e6e0d2", 0.64));
-    const top0 = cyTop - ch * 0.6;
-    for (let i = -3; i <= 3; i++) {
-      ctx.fillStyle = mul("#efe9da", i < 0 ? F_LEFT : F_RIGHT);
-      ctx.fillRect(cx + (i / 3) * hw * 0.8 - 2, top0 - ch * 1.6, 4, ch * 1.6);
-    }
-    // pediment
-    fillQuad(ctx, [cx - hw, top0 - ch * 1.6, cx + hw, top0 - ch * 1.6, cx, top0 - ch * 2.4], mul("#cfc7b4", 1));
-  } else if (sil === "arena") {
-    for (let i = 0; i < 3; i++) {
-      const f = 1 - i * 0.22;
-      ctx.fillStyle = mul("#cdbfa0", 1 - i * 0.12);
-      ctx.beginPath();
-      ctx.ellipse(cx, cyTop - i * ch * 0.7, hw * f, hh * f, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = mul("#9c8f74", 0.8);
-      ctx.beginPath();
-      ctx.ellipse(cx, cyTop - i * ch * 0.7 - ch * 0.35, hw * f * 0.7, hh * f * 0.7, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else if (sil === "dome") {
-    prismPx(ctx, cx, cyTop, hw, hh, ch * 1.2, mul("#d8d2c4", 1), mul("#d8d2c4", 0.82), mul("#d8d2c4", 0.64));
-    const dy = cyTop - ch * 1.2;
-    ctx.fillStyle = mul(mix("#e8e2d4", accent, 0.15), 1);
-    ctx.beginPath();
-    ctx.ellipse(cx, dy + hh * 0.2, hw * 0.85, hw * 0.7, 0, Math.PI, 0);
-    ctx.fill();
-    ctx.fillStyle = accent;
-    ctx.beginPath();
-    ctx.arc(cx, dy - hw * 0.5, 3, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (sil === "spire") {
-    prismPx(ctx, cx, cyTop, hw * 0.8, hh * 0.8, ch * 2.2, mul("#b8b0a2", 1), mul("#b8b0a2", 0.82), mul("#b8b0a2", 0.62));
-    const t0 = cyTop - ch * 2.2;
-    // tall steeple
-    fillQuad(ctx, [cx - hw * 0.3, t0, cx + hw * 0.3, t0, cx, t0 - ch * 2.2], mul("#7a6e8e", 1));
-    // stained glass glow
-    gctx.fillStyle = accent;
-    gctx.fillRect(cx - 2, cyTop - ch * 1.6, 4, ch * 1.0);
-  } else if (sil === "hall") {
-    prismPx(ctx, cx, cyTop, hw, hh, ch * 1.4, mul("#bfd0dc", 1), mul("#9fb6c6", 0.85), mul("#88a0b2", 0.66));
-    // glow roof line
-    gctx.fillStyle = mix("#bfe8ff", accent, 0.3);
-    gctx.fillRect(cx - hw, cyTop - ch * 1.5, hw * 2, 3);
-  } else if (sil === "lattice") {
-    const topY = cyTop - ch * 4.2;
-    for (const g of [ctx]) {
-      g.strokeStyle = mul("#8a7a5a", 1);
-      g.lineWidth = 2;
-      g.beginPath();
-      g.moveTo(cx - hw * 0.8, cyTop + hh);
-      g.lineTo(cx, topY);
-      g.lineTo(cx + hw * 0.8, cyTop + hh);
-      g.moveTo(cx - hw * 0.5, cyTop - ch * 1.5);
-      g.lineTo(cx + hw * 0.5, cyTop - ch * 1.5);
-      g.moveTo(cx - hw * 0.3, cyTop - ch * 2.8);
-      g.lineTo(cx + hw * 0.3, cyTop - ch * 2.8);
-      g.stroke();
-    }
-  } else if (sil === "rocket") {
-    prismPx(ctx, cx - hw * 0.5, cyTop, hw * 0.25, hh * 0.25, ch * 3, mul("#9aa2ae", 1), mul("#9aa2ae", 0.8), mul("#9aa2ae", 0.6)); // gantry
-    // rocket body
-    ctx.fillStyle = "#eef2f5";
-    ctx.fillRect(cx - 4, cyTop - ch * 3.2, 8, ch * 3.2);
-    fillQuad(ctx, [cx - 4, cyTop - ch * 3.2, cx + 4, cyTop - ch * 3.2, cx, cyTop - ch * 3.9], "#d05a4a");
-    gctx.fillStyle = "#ffd060";
-    gctx.beginPath();
-    gctx.ellipse(cx, cyTop + hh * 0.3, 7, 4, 0, 0, Math.PI * 2);
-    gctx.fill();
-  } else if (sil === "core") {
-    const cy = cyTop - ch * 1.5;
-    const r = hw * 1.0;
-    fillQuad(ctx, [cx, cy - r, cx + r, cy, cx, cy + r, cx - r, cy], mix("#5a3a8a", accent, 0.4));
-    for (const g of [ctx, gctx]) {
-      g.strokeStyle = accent;
-      g.lineWidth = g === gctx ? 4 : 2;
-      g.beginPath();
-      g.moveTo(cx, cy - r);
-      g.lineTo(cx + r, cy);
-      g.lineTo(cx, cy + r);
-      g.lineTo(cx - r, cy);
-      g.closePath();
-      g.moveTo(cx, cy - r);
-      g.lineTo(cx, cy + r);
-      g.moveTo(cx - r, cy);
-      g.lineTo(cx + r, cy);
-      g.stroke();
-    }
-  }
+  // every wonder radiates a faint ambient glow — monuments should feel alive
+  gctx.save();
+  gctx.globalAlpha = 0.5;
+  drawSpriteFootprint(gctx, img, cx, cyTop, targetW, aspect);
+  gctx.restore();
 }
 
 function drawScreenWonder(ctx: Ctx, gctx: Ctx, w: Wonder, era: Era, W: number, H: number) {
@@ -1150,7 +895,7 @@ export function renderFrame(ctx: Ctx, scene: SceneData, character: Character, W:
   } catch {
     /* unsupported */
   }
-  ctx.globalAlpha = scene.night ? 0.9 : 0.6;
+  ctx.globalAlpha = scene.night ? 0.68 : 0.6;
   ctx.drawImage(scene.glow, 0, 0);
   ctx.filter = "none";
   ctx.globalAlpha = 1;

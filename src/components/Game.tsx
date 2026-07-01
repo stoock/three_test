@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useGameStore } from "@/store/gameStore";
 import { useGameClock } from "@/hooks/useGameClock";
+import { preloadSprites } from "@/lib/sprites";
 import CharacterCreation from "./CharacterCreation";
 import IsoScene from "./IsoScene";
 import StatsPanel from "./StatsPanel";
@@ -12,6 +13,7 @@ import EventLog from "./EventLog";
 export default function Game() {
   useGameClock();
   const [mounted, setMounted] = useState(false);
+  const [spritesLoaded, setSpritesLoaded] = useState(false);
   const character = useGameStore((s) => s.character);
   const lastSavedAt = useGameStore((s) => s.lastSavedAt);
   const forceSave = useGameStore((s) => s.forceSave);
@@ -19,9 +21,15 @@ export default function Game() {
   const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => setMounted(true), []);
+  // Preload the baked-sprite catalogue once; nothing renders the world (or
+  // captures a snapshot) until this resolves, so drawImage() calls later on
+  // can always assume their sprite is already decoded and ready.
+  useEffect(() => {
+    preloadSprites().then(() => setSpritesLoaded(true));
+  }, []);
 
   // Avoid hydration mismatch: nothing persisted is known until client mount.
-  if (!mounted) {
+  if (!mounted || !spritesLoaded) {
     return (
       <div className="flex min-h-screen items-center justify-center text-sm text-black/40">
         불러오는 중…
