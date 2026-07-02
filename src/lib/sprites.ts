@@ -15,6 +15,7 @@ export interface SpriteEntry {
   file: string;
   pxW: number;
   pxH: number;
+  groundInset: number;
   w: number;
   d: number;
   h: number;

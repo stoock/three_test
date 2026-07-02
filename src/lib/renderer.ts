@@ -688,8 +688,9 @@ function drawProp(ctx: Ctx, gctx: Ctx, name: string, cx: number, baseY: number, 
   if (!entry || !img) return;
   const targetW = shw * (PROP_SCALE[name] ?? 1);
   const targetH = targetW * (entry.pxH / entry.pxW);
+  const groundInsetFrac = entry.groundInset / entry.pxH;
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(img, cx - targetW / 2, baseY - targetH, targetW, targetH);
+  ctx.drawImage(img, cx - targetW / 2, baseY - targetH + targetH * groundInsetFrac, targetW, targetH);
   // lamps cast light into the bloom layer after dark
   if (night && (name === "lamp" || name === "lamp-neon")) {
     gctx.fillStyle = "rgba(255,230,160,0.9)";
@@ -707,10 +708,11 @@ function drawSpriteFootprint(
   baseY: number,
   targetW: number,
   aspect: number, // pxH / pxW of the source image, preserved to avoid distortion
+  groundInsetFrac = 0, // fraction of image height that is empty padding below the sprite's true ground-contact pixel
 ) {
   const targetH = targetW * aspect;
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(img, cx - targetW / 2, baseY - targetH, targetW, targetH);
+  ctx.drawImage(img, cx - targetW / 2, baseY - targetH + targetH * groundInsetFrac, targetW, targetH);
   return targetH;
 }
 
@@ -752,16 +754,18 @@ function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: numbe
     const targetW = shw * (1.15 + sizeMul * 0.5);
     groundShadow(ctx, cx, cyTop, targetW);
     const aspect = chosen.pxH / chosen.pxW;
+    const groundInsetFrac = chosen.groundInset / chosen.pxH;
     // the body sprite already has its lit windows, corner lights and crown
     // spire baked in with real lighting — only the (blurred) bloom layer
     // needs a separate, restrained pass.
-    drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect);
+    drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect, groundInsetFrac);
 
+    const glowEntry = getSpriteEntry(`${chosen.id}-glow`);
     const glow = getSpriteImage(`${chosen.id}-glow`);
-    if (glow) {
+    if (glow && glowEntry) {
       gctx.save();
       gctx.globalAlpha = 0.35;
-      drawSpriteFootprint(gctx, glow, cx, cyTop, targetW, aspect);
+      drawSpriteFootprint(gctx, glow, cx, cyTop, targetW, aspect, glowEntry.groundInset / glowEntry.pxH);
       gctx.restore();
     }
     return;
@@ -778,7 +782,7 @@ function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: numbe
 
   const targetW = shw * (1.0 + sizeMul * 0.45);
   groundShadow(ctx, cx, cyTop, targetW);
-  drawSpriteFootprint(ctx, img, cx, cyTop, targetW, chosen.pxH / chosen.pxW);
+  drawSpriteFootprint(ctx, img, cx, cyTop, targetW, chosen.pxH / chosen.pxW, chosen.groundInset / chosen.pxH);
 }
 
 function tallThreshold(structure: string): number {
@@ -813,12 +817,13 @@ function drawWonder(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: number,
   const targetW = shw * (w.footprint >= 2 ? 3.2 : 2.4);
   groundShadow(ctx, cx, cyTop, targetW * 1.15);
   const aspect = entry.pxH / entry.pxW;
-  drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect);
+  const groundInsetFrac = entry.groundInset / entry.pxH;
+  drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect, groundInsetFrac);
 
   // every wonder radiates a faint ambient glow — monuments should feel alive
   gctx.save();
   gctx.globalAlpha = 0.5;
-  drawSpriteFootprint(gctx, img, cx, cyTop, targetW, aspect);
+  drawSpriteFootprint(gctx, img, cx, cyTop, targetW, aspect, groundInsetFrac);
   gctx.restore();
 }
 

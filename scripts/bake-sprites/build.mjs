@@ -74,6 +74,7 @@ for (const r of results) {
     file,
     pxW: r.pxW,
     pxH: r.pxH,
+    groundInset: r.groundInset ?? 0,
     w: r.w,
     d: r.d,
     h: r.h,

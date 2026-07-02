@@ -154,7 +154,31 @@ function bakeScene(group, opts = {}) {
   renderer.clear();
   renderer.render(scene, camera);
   const dataUrl = renderer.domElement.toDataURL("image/png");
-  return { dataUrl, pxW, pxH, w: size.x / VOX, d: size.z / VOX, h: size.y / VOX };
+
+  // The camera frustum above is padded symmetrically on all four sides, so
+  // the baked image always has some transparent margin below the shape's
+  // true ground-contact silhouette too. If callers assume the image's
+  // bottom-most pixel row IS the ground line, the sprite appears to float.
+  // Scan the actual rendered alpha channel to find how many empty rows sit
+  // below the real content, so callers can compensate.
+  const readCanvas = document.createElement("canvas");
+  readCanvas.width = pxW;
+  readCanvas.height = pxH;
+  const rctx = readCanvas.getContext("2d");
+  rctx.drawImage(renderer.domElement, 0, 0, pxW, pxH);
+  const pixels = rctx.getImageData(0, 0, pxW, pxH).data;
+  let lowestOpaqueRow = -1;
+  for (let y = pxH - 1; y >= 0 && lowestOpaqueRow < 0; y--) {
+    for (let x = 0; x < pxW; x++) {
+      if (pixels[(y * pxW + x) * 4 + 3] > 10) {
+        lowestOpaqueRow = y;
+        break;
+      }
+    }
+  }
+  const groundInset = lowestOpaqueRow >= 0 ? pxH - 1 - lowestOpaqueRow : 0;
+
+  return { dataUrl, pxW, pxH, groundInset, w: size.x / VOX, d: size.z / VOX, h: size.y / VOX };
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +378,12 @@ function bakeTower(structure, recipeFn, glowFn, buckets, variants = 2) {
       const glowModel = glowFn(seed, floors, model.w, model.d);
       const glowGroup = buildVoxelGroup(glowModel.cells, PALETTE);
       const glowBaked = bakeScene(glowGroup, { noShadow: true, forceBox: sharedBox });
-      pushResult({ id: `${structure}-v${v}-f${floors}-glow`, kind: "building-glow", structure, variant: v, floors, ...glowBaked });
+      // body and glow share the identical forced camera frame, so a given
+      // world-space ground line maps to the same pixel row in both — but the
+      // glow mask's own lit pixels rarely reach that low (ground-floor
+      // windows are often unlit), so its own alpha scan finds the wrong,
+      // much higher "bottom". Reuse the body's groundInset instead.
+      pushResult({ id: `${structure}-v${v}-f${floors}-glow`, kind: "building-glow", structure, variant: v, floors, ...glowBaked, groundInset: baked.groundInset });
     }
   }
 }
