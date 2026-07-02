@@ -130,6 +130,18 @@ function buildBaseTex(name: string): AnyCanvas {
       for (let i = 0; i < 12; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(s, 0.82));
       break;
     }
+    case "path": {
+      // packed-dirt village road with pebbles and worn wheel lines
+      const s = "#b9a276";
+      for (let y = 0; y < TS; y++) for (let x = 0; x < TS; x++) px(ctx, x, y, mul(s, 0.88 + rng() * 0.2));
+      for (let i = 0; i < 10; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(s, 0.72));
+      for (let i = 0; i < 6; i++) px(ctx, (rng() * TS) | 0, (rng() * TS) | 0, mul(s, 1.18));
+      for (let x = 0; x < TS; x++) {
+        px(ctx, x, 5, mul(s, 0.8));
+        px(ctx, x, 10, mul(s, 0.8));
+      }
+      break;
+    }
     case "stone":
     case "stone_side": {
       const s = "#8f877b";
@@ -413,6 +425,73 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
     buildings.push({ col: t.col, row: t.row, floors, seed: ((t.col * 73 + t.row * 131) >>> 0) || 1 });
   }
 
+  // --- roads: BFS shortest paths from home to every building; the union of
+  // those paths becomes the village road network (drawn as a packed-dirt top)
+  const roadKey = new Set<string>();
+  {
+    const passable = new Map<string, TileD>();
+    for (const t of tiles) if (t.terrain !== "water") passable.set(`${t.col},${t.row}`, t);
+    const parent = new Map<string, string | null>();
+    const q: string[] = [`${home.col},${home.row}`];
+    parent.set(q[0], null);
+    while (q.length) {
+      const cur = q.shift()!;
+      const [cc, cr] = cur.split(",").map(Number);
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nk = `${cc + dc},${cr + dr}`;
+        if (!passable.has(nk) || parent.has(nk)) continue;
+        parent.set(nk, cur);
+        q.push(nk);
+      }
+    }
+    for (const b of buildings) {
+      let cur: string | null | undefined = parent.has(`${b.col},${b.row}`) ? `${b.col},${b.row}` : undefined;
+      while (cur) {
+        if (cur !== `${b.col},${b.row}`) roadKey.add(cur);
+        cur = parent.get(cur) ?? null;
+      }
+    }
+    roadKey.delete(`${home.col},${home.row}`);
+    for (const k of builtKey) roadKey.delete(k);
+    for (const k of wonderKey) roadKey.delete(k);
+  }
+
+  // --- props: set dressing on empty tiles (era-appropriate), boats on water
+  const propAt = new Map<string, string>();
+  {
+    const prng = makeRng((character.seed ^ 0x9e0b) >>> 0);
+    const eraPool =
+      era.index <= 1
+        ? ["well", "fence", "stall", "crates", "bush"]
+        : era.index <= 4
+          ? ["well", "fence", "stall", "crates", "lamp", "bush"]
+          : era.index <= 7
+            ? ["lamp", "crates", "fence", "bush"]
+            : ["bush", "bush", "lamp-neon"];
+    const nearRoadOrBuilding = (t: TileD) =>
+      ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([dc, dr]) => {
+        const nk = `${t.col + dc},${t.row + dr}`;
+        return roadKey.has(nk) || builtKey.has(nk);
+      });
+    for (const t of tiles) {
+      const key = `${t.col},${t.row}`;
+      if (t.terrain === "water") {
+        // rowing boats moored beside the land (pre-space eras)
+        const nearLand = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([dc, dr]) =>
+          tiles.some((o) => o.col === t.col + dc && o.row === t.row + dr && o.terrain !== "water"),
+        );
+        if (nearLand && era.index >= 1 && era.index <= 7 && prng() < 0.12) propAt.set(key, "boat");
+        continue;
+      }
+      if (builtKey.has(key) || wonderKey.has(key) || roadKey.has(key)) continue;
+      if (t.col === home.col && t.row === home.row) continue;
+      if (t.terrain === "forest") continue; // trees live there
+      if (nearRoadOrBuilding(t) && prng() < 0.4) propAt.set(key, eraPool[(prng() * eraPool.length) | 0]);
+      else if (t.terrain === "grass" && era.index <= 4 && prng() < 0.14) propAt.set(key, "farmplot");
+      else if (t.terrain === "grass" && prng() < 0.08) propAt.set(key, prng() < 0.6 ? "tree-a" : "tree-b");
+    }
+  }
+
   // fit-to-canvas (extents at S=1)
   let minX = Infinity,
     maxX = -Infinity,
@@ -428,13 +507,17 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
     maxY = Math.max(maxY, yBot);
   };
   for (const t of tiles) consider(t.col, t.row, t.layers, t.terrain === "water" ? 0 : BASE_DEPTH);
+  // Baked sprites are drawn at ~1.2-1.7 tile-widths and keep their own aspect,
+  // so their on-screen height tops out around 4-7 tile-height units — reserve
+  // that, not the raw sim floor count (which would waste half the canvas).
+  const towerEra = era.structure === "tower" || era.structure === "arcology";
   for (const b of buildings) {
     const t = tiles.find((x) => x.col === b.col && x.row === b.row)!;
-    consider(b.col, b.row, t.layers + b.floors + 2, BASE_DEPTH);
+    consider(b.col, b.row, t.layers + (towerEra ? 7 : 4), BASE_DEPTH);
   }
   for (const p of wonderPlacements) {
     const t = tiles.find((x) => x.col === p.col && x.row === p.row)!;
-    consider(p.col, p.row, t.layers + 12, BASE_DEPTH); // wonders are tall — reserve headroom
+    consider(p.col, p.row, t.layers + 6, BASE_DEPTH);
   }
   const spanX = maxX - minX || 1;
   const spanY = maxY - minY || 1;
@@ -470,17 +553,23 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
 
   for (const t of ordered) {
     const top = project(t.col, t.row, t.layers);
+    const key = `${t.col},${t.row}`;
     if (t.terrain === "water") {
       drawColumn(ctx, top.x, top.y, SHW, SHH, SCH, 1, SDEPTH * 0.4, "water", "water_deep", "water_deep");
       water.push({ x: top.x, y: top.y });
-    } else {
-      const m = terrainMats(t.terrain);
-      drawColumn(ctx, top.x, top.y, SHW, SHH, SCH, t.layers, SDEPTH, m.top, m.sideTop, m.sideDeep);
+      const boat = propAt.get(key);
+      if (boat) drawProp(ctx, gctx, boat, top.x, top.y + SHH * 0.2, SHW, night);
+      continue;
     }
-    const key = `${t.col},${t.row}`;
-    if (t.terrain === "forest" && !builtKey.has(key) && !wonderKey.has(key)) {
+    const m = terrainMats(t.terrain);
+    drawColumn(ctx, top.x, top.y, SHW, SHH, SCH, t.layers, SDEPTH, roadKey.has(key) ? "path" : m.top, m.sideTop, m.sideDeep);
+
+    if (t.terrain === "forest" && !builtKey.has(key) && !wonderKey.has(key) && !roadKey.has(key)) {
       const n = 1 + ((treeRng() * 2) | 0);
-      for (let k = 0; k < n; k++) drawTree(ctx, top.x + (treeRng() - 0.5) * SHW * 0.7, top.y + (treeRng() - 0.5) * SHH * 0.7, S, era);
+      for (let k = 0; k < n; k++) {
+        const name = treeRng() < 0.65 ? "tree-a" : treeRng() < 0.75 ? "bush" : "tree-b";
+        drawProp(ctx, gctx, name, top.x + (treeRng() - 0.5) * SHW * 0.8, top.y + (treeRng() - 0.5) * SHH * 0.8, SHW, night);
+      }
     }
     if (wonderKey.has(key)) {
       const wp = wonderPlacements.find((p) => p.col === t.col && p.row === t.row)!;
@@ -488,6 +577,10 @@ export function prepareScene(character: Character, W: number, H: number): SceneD
     } else {
       const b = buildings.find((x) => x.col === t.col && x.row === t.row);
       if (b) drawBuilding(ctx, gctx, top.x, top.y, SHW, SHH, SCH, b, era);
+      else {
+        const prop = propAt.get(key);
+        if (prop) drawProp(ctx, gctx, prop, top.x, top.y, SHW, night);
+      }
     }
   }
 
@@ -573,23 +666,37 @@ function drawColumn(
   paintFace(ctx, getTex(topMat, F_TOP), cx - shw, cyTop, shw, -shh, shw, shh);
 }
 
-function drawTree(ctx: Ctx, cx: number, cyTop: number, S: number, era: Era) {
-  const trunkH = 10 * S;
-  const tw = 3 * S;
-  ctx.fillStyle = "rgba(0,0,0,0.20)";
-  ctx.beginPath();
-  ctx.ellipse(cx, cyTop + 1, 7 * S, 3 * S, 0, 0, Math.PI * 2);
-  ctx.fill();
-  fillQuad(ctx, [cx - tw / 2, cyTop, cx, cyTop + 1.5 * S, cx, cyTop + 1.5 * S - trunkH, cx - tw / 2, cyTop - trunkH], mul("#6e4a2a", 0.8));
-  fillQuad(ctx, [cx, cyTop + 1.5 * S, cx + tw / 2, cyTop, cx + tw / 2, cyTop - trunkH, cx, cyTop + 1.5 * S - trunkH], mul("#6e4a2a", 0.6));
-  const shw = 6 * S,
-    shh = 3 * S,
-    sch = 7 * S;
-  const ly = cyTop - trunkH - sch + shh;
-  void era;
-  paintFace(ctx, getTex("leaf", F_LEFT), cx - shw, ly, shw, shh, 0, sch);
-  paintFace(ctx, getTex("leaf", F_RIGHT), cx, ly + shh, shw, -shh, 0, sch);
-  paintFace(ctx, getTex("leaf", F_TOP), cx - shw, ly, shw, -shh, shw, shh);
+// Per-prop on-screen width relative to a tile's half-width. Baked sprites keep
+// their own aspect, so height follows automatically.
+const PROP_SCALE: Record<string, number> = {
+  "tree-a": 1.5,
+  "tree-b": 1.3,
+  bush: 0.8,
+  well: 1.0,
+  fence: 1.4,
+  farmplot: 1.9,
+  lamp: 0.55,
+  "lamp-neon": 0.55,
+  stall: 1.2,
+  crates: 0.8,
+  boat: 1.3,
+};
+
+function drawProp(ctx: Ctx, gctx: Ctx, name: string, cx: number, baseY: number, shw: number, night: boolean) {
+  const entry = getSpriteEntry(`prop-${name}`);
+  const img = getSpriteImage(`prop-${name}`);
+  if (!entry || !img) return;
+  const targetW = shw * (PROP_SCALE[name] ?? 1);
+  const targetH = targetW * (entry.pxH / entry.pxW);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, cx - targetW / 2, baseY - targetH, targetW, targetH);
+  // lamps cast light into the bloom layer after dark
+  if (night && (name === "lamp" || name === "lamp-neon")) {
+    gctx.fillStyle = "rgba(255,230,160,0.9)";
+    gctx.beginPath();
+    gctx.arc(cx, baseY - targetH * 0.8, targetW * 0.35, 0, Math.PI * 2);
+    gctx.fill();
+  }
 }
 
 // ---- buildings ----
@@ -642,24 +749,21 @@ function drawBuilding(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, shw: numbe
     const img = getSpriteImage(chosen.id);
     if (!img) return;
 
-    const targetW = shw * (0.9 + sizeMul * 0.5);
+    const targetW = shw * (1.15 + sizeMul * 0.5);
     groundShadow(ctx, cx, cyTop, targetW);
     const aspect = chosen.pxH / chosen.pxW;
-    // the body sprite already has its lit windows baked in with real
-    // lighting — only the (blurred) bloom layer needs a separate pass.
+    // the body sprite already has its lit windows, corner lights and crown
+    // spire baked in with real lighting — only the (blurred) bloom layer
+    // needs a separate, restrained pass.
     drawSpriteFootprint(ctx, img, cx, cyTop, targetW, aspect);
 
     const glow = getSpriteImage(`${chosen.id}-glow`);
     if (glow) {
       gctx.save();
-      gctx.globalAlpha = 0.4;
+      gctx.globalAlpha = 0.35;
       drawSpriteFootprint(gctx, glow, cx, cyTop, targetW, aspect);
       gctx.restore();
     }
-
-    const roofY = cyTop - targetW * aspect;
-    if (rng() < 0.4) drawAntenna(ctx, gctx, cx, roofY, sch, era);
-    if (structure === "arcology") drawNeonEdges(ctx, gctx, cx, cyTop, targetW / 2, (targetW / 2) * (shh / shw), targetW * aspect, era);
     return;
   }
 
@@ -691,40 +795,6 @@ function tallThreshold(structure: string): number {
       return 6;
     default:
       return 3;
-  }
-}
-
-function drawAntenna(ctx: Ctx, gctx: Ctx, cx: number, roofY: number, sch: number, era: Era) {
-  ctx.strokeStyle = "#cfd6df";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(cx, roofY);
-  ctx.lineTo(cx, roofY - sch * 1.2);
-  ctx.stroke();
-  const c = era.palette.accent;
-  ctx.fillStyle = c;
-  ctx.beginPath();
-  ctx.arc(cx, roofY - sch * 1.2, 2.2, 0, Math.PI * 2);
-  ctx.fill();
-  gctx.fillStyle = c;
-  gctx.beginPath();
-  gctx.arc(cx, roofY - sch * 1.2, 4, 0, Math.PI * 2);
-  gctx.fill();
-}
-
-function drawNeonEdges(ctx: Ctx, gctx: Ctx, cx: number, cyTop: number, bw: number, bh: number, totalH: number, era: Era) {
-  const c = era.palette.accent;
-  const top = cyTop - totalH;
-  for (const g of [ctx, gctx]) {
-    g.strokeStyle = c;
-    g.lineWidth = g === gctx ? 3 : 1.5;
-    g.beginPath();
-    g.moveTo(cx, cyTop + bh);
-    g.lineTo(cx, top + bh);
-    g.moveTo(cx - bw, top);
-    g.lineTo(cx, top + bh);
-    g.lineTo(cx + bw, top);
-    g.stroke();
   }
 }
 

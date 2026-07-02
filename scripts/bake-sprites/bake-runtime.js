@@ -10,7 +10,8 @@ import {
   towerWholeGlow,
   arcologyWholeRecipe,
   arcologyWholeGlow,
-  PALETTE,
+  PROP_RECIPES,
+  FLAT_PALETTE as PALETTE,
   mulberry,
 } from "./recipes.mjs";
 
@@ -43,13 +44,15 @@ function buildVoxelGroup(cells, palette) {
   }
   const group = new THREE.Group();
   for (const [colorId, pts] of byColor) {
-    const emissive = colorId === "glowWhite";
+    const glow = colorId === "glowWhite";
+    const litWin = colorId === "glassLit";
+    const emissive = glow || litWin;
     const mat = new THREE.MeshStandardMaterial({
       color: palette[colorId] ?? "#999999",
       roughness: emissive ? 0.4 : 0.85,
       metalness: 0.03,
-      emissive: emissive ? new THREE.Color("#fff6d8") : new THREE.Color("#000000"),
-      emissiveIntensity: emissive ? 1.1 : 0,
+      emissive: glow ? new THREE.Color("#fff6d8") : litWin ? new THREE.Color("#ffd98a") : new THREE.Color("#000000"),
+      emissiveIntensity: glow ? 1.1 : litWin ? 0.55 : 0,
     });
     const mesh = new THREE.InstancedMesh(geo, mat, pts.length);
     mesh.castShadow = !emissive;
@@ -112,8 +115,9 @@ function bakeScene(group, opts = {}) {
   box.getSize(size);
 
   const camDist = 30;
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
-  camera.position.set(center.x + camDist, center.y + camDist * 1.05, center.z + camDist);
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 120);
+  // ~31° elevation — closer to the 2:1 iso ground grid, more "street level" drama
+  camera.position.set(center.x + camDist, center.y + camDist * 0.86, center.z + camDist);
   camera.lookAt(center.x, center.y + size.y * 0.42, center.z);
 
   // fit the ortho frustum tightly to the shape's projected bounds by
@@ -318,10 +322,10 @@ function bakeSingle(structure, recipeFn, variants = 2) {
   }
 }
 
-bakeSingle("hut", hutRecipe);
+bakeSingle("hut", hutRecipe, 3);
 bakeSingle("temple", templeRecipe);
 bakeSingle("keep", keepRecipe);
-bakeSingle("manor", manorRecipe);
+bakeSingle("manor", manorRecipe, 3);
 bakeSingle("factory", factoryRecipe);
 // dome only has one height bucket in the sim (era8 floors 2-3), bake 2 variants
 for (let v = 0; v < 2; v++) {
@@ -362,6 +366,15 @@ for (const [wonderId, builder] of Object.entries(WONDER_BUILDERS)) {
   const group = builder();
   const baked = bakeScene(group);
   pushResult({ id: `wonder-${wonderId}`, kind: "wonder", wonderId, ...baked });
+}
+
+// props — trees, wells, fences, lamps, market stalls, farm plots, boats…
+// the set dressing that turns "buildings on tiles" into a lived-in place.
+for (const [name, fn] of Object.entries(PROP_RECIPES)) {
+  const model = fn((name.charCodeAt(0) * 2749 + name.length * 97) >>> 0);
+  const group = buildVoxelGroup(model.cells, PALETTE);
+  const baked = bakeScene(group);
+  pushResult({ id: `prop-${name}`, kind: "prop", structure: name, ...baked });
 }
 
 globalThis.__BAKE_RESULT__ = results;

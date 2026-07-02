@@ -8,11 +8,11 @@
     "tall": false,
     "floors": null,
     "file": "hut-v0-short.png",
-    "pxW": 332,
+    "pxW": 301,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 6.999999710491726,
-    "h": 4.999999843892597
+    "w": 18.9999996196656,
+    "d": 15.999999997161684,
+    "h": 18.99999983253933
   },
   {
     "id": "hut-v0-tall",
@@ -23,11 +23,11 @@
     "tall": true,
     "floors": null,
     "file": "hut-v0-tall.png",
-    "pxW": 282,
+    "pxW": 288,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 7.999999892143976,
-    "h": 8.000000105017708
+    "w": 19.999999801317852,
+    "d": 17.000000178813934,
+    "h": 21.99999924216952
   },
   {
     "id": "hut-v1-short",
@@ -38,11 +38,11 @@
     "tall": false,
     "floors": null,
     "file": "hut-v1-short.png",
-    "pxW": 257,
+    "pxW": 301,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 6.999999710491726,
-    "h": 8.999999719006675
+    "w": 18.9999996196656,
+    "d": 15.999999997161684,
+    "h": 18.99999983253933
   },
   {
     "id": "hut-v1-tall",
@@ -53,11 +53,41 @@
     "tall": true,
     "floors": null,
     "file": "hut-v1-tall.png",
-    "pxW": 299,
+    "pxW": 280,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 7.999999892143976,
-    "h": 6.999999923365457
+    "w": 18.9999996196656,
+    "d": 15.999999997161684,
+    "h": 21.99999924216952
+  },
+  {
+    "id": "hut-v2-short",
+    "kind": "building-single",
+    "structure": "hut",
+    "wonderId": null,
+    "variant": 2,
+    "tall": false,
+    "floors": null,
+    "file": "hut-v2-short.png",
+    "pxW": 306,
+    "pxH": 340,
+    "w": 19.999999801317852,
+    "d": 15.999999997161684,
+    "h": 18.99999983253933
+  },
+  {
+    "id": "hut-v2-tall",
+    "kind": "building-single",
+    "structure": "hut",
+    "wonderId": null,
+    "variant": 2,
+    "tall": true,
+    "floors": null,
+    "file": "hut-v2-tall.png",
+    "pxW": 273,
+    "pxH": 340,
+    "w": 17.000000391687667,
+    "d": 14.999999815509433,
+    "h": 20.999999060517265
   },
   {
     "id": "temple-v0-short",
@@ -68,11 +98,11 @@
     "tall": false,
     "floors": null,
     "file": "temple-v0-short.png",
-    "pxW": 340,
-    "pxH": 311,
-    "w": 9.999999687785195,
-    "d": 7.999999892143976,
-    "h": 4.999999843892597
+    "pxW": 314,
+    "pxH": 340,
+    "w": 21.99999924216952,
+    "d": 14.000000059604645,
+    "h": 17.99999965088708
   },
   {
     "id": "temple-v0-tall",
@@ -83,11 +113,11 @@
     "tall": true,
     "floors": null,
     "file": "temple-v0-tall.png",
-    "pxW": 336,
+    "pxW": 285,
     "pxH": 340,
-    "w": 9.000000073796228,
-    "d": 6.999999710491726,
-    "h": 5.999999741713206
+    "w": 20.00000001419158,
+    "d": 12.999999877952394,
+    "h": 20.00000001419158
   },
   {
     "id": "temple-v1-short",
@@ -98,11 +128,11 @@
     "tall": false,
     "floors": null,
     "file": "temple-v1-short.png",
-    "pxW": 340,
-    "pxH": 316,
-    "w": 9.000000073796228,
-    "d": 7.999999892143976,
-    "h": 4.999999843892597
+    "pxW": 305,
+    "pxH": 340,
+    "w": 20.00000001419158,
+    "d": 14.000000059604645,
+    "h": 17.99999965088708
   },
   {
     "id": "temple-v1-tall",
@@ -113,11 +143,11 @@
     "tall": true,
     "floors": null,
     "file": "temple-v1-tall.png",
-    "pxW": 339,
+    "pxW": 302,
     "pxH": 340,
-    "w": 10.999999869437445,
-    "d": 7.999999892143976,
-    "h": 6.999999923365457
+    "w": 22.99999942382177,
+    "d": 14.000000059604645,
+    "h": 20.00000001419158
   },
   {
     "id": "keep-v0-short",
@@ -128,11 +158,11 @@
     "tall": false,
     "floors": null,
     "file": "keep-v0-short.png",
-    "pxW": 309,
+    "pxW": 298,
     "pxH": 340,
-    "w": 6.999999923365457,
-    "d": 5.999999741713206,
-    "h": 5.999999741713206
+    "w": 20.999999060517265,
+    "d": 20.00000001419158,
+    "h": 22.99999942382177
   },
   {
     "id": "keep-v0-tall",
@@ -143,11 +173,11 @@
     "tall": true,
     "floors": null,
     "file": "keep-v0-tall.png",
-    "pxW": 279,
+    "pxW": 273,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 5.999999741713206,
-    "h": 6.999999923365457
+    "w": 18.99999983253933,
+    "d": 18.99999983253933,
+    "h": 24.99999978712627
   },
   {
     "id": "keep-v1-short",
@@ -158,11 +188,11 @@
     "tall": false,
     "floors": null,
     "file": "keep-v1-short.png",
-    "pxW": 332,
+    "pxW": 294,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 6.999999923365457,
-    "h": 4.999999843892597
+    "w": 18.99999983253933,
+    "d": 20.999999060517265,
+    "h": 22.99999942382177
   },
   {
     "id": "keep-v1-tall",
@@ -173,11 +203,11 @@
     "tall": true,
     "floors": null,
     "file": "keep-v1-tall.png",
-    "pxW": 279,
+    "pxW": 273,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 5.999999741713206,
-    "h": 6.999999923365457
+    "w": 18.99999983253933,
+    "d": 18.99999983253933,
+    "h": 24.99999978712627
   },
   {
     "id": "manor-v0-short",
@@ -188,11 +218,11 @@
     "tall": false,
     "floors": null,
     "file": "manor-v0-short.png",
-    "pxW": 230,
+    "pxW": 286,
     "pxH": 340,
-    "w": 6.999999923365457,
-    "d": 6.999999710491726,
-    "h": 11.999999696300144
+    "w": 21.999999029295786,
+    "d": 15.999999997161684,
+    "h": 22.99999942382177
   },
   {
     "id": "manor-v0-tall",
@@ -203,11 +233,11 @@
     "tall": true,
     "floors": null,
     "file": "manor-v0-tall.png",
-    "pxW": 230,
+    "pxW": 269,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 7.999999892143976,
-    "h": 11.999999696300144
+    "w": 19.999999801317852,
+    "d": 17.000000178813934,
+    "h": 24.99999978712627
   },
   {
     "id": "manor-v1-short",
@@ -218,11 +248,11 @@
     "tall": false,
     "floors": null,
     "file": "manor-v1-short.png",
-    "pxW": 250,
+    "pxW": 290,
     "pxH": 340,
-    "w": 6.999999923365457,
-    "d": 7.999999892143976,
-    "h": 10.999999514647893
+    "w": 21.999999029295786,
+    "d": 17.000000178813934,
+    "h": 22.99999942382177
   },
   {
     "id": "manor-v1-tall",
@@ -233,11 +263,41 @@
     "tall": true,
     "floors": null,
     "file": "manor-v1-tall.png",
-    "pxW": 230,
+    "pxW": 269,
     "pxH": 340,
-    "w": 5.999999741713206,
-    "d": 7.999999892143976,
-    "h": 11.999999696300144
+    "w": 19.999999801317852,
+    "d": 17.000000178813934,
+    "h": 24.99999978712627
+  },
+  {
+    "id": "manor-v2-short",
+    "kind": "building-single",
+    "structure": "manor",
+    "wonderId": null,
+    "variant": 2,
+    "tall": false,
+    "floors": null,
+    "file": "manor-v2-short.png",
+    "pxW": 286,
+    "pxH": 340,
+    "w": 20.999999982970103,
+    "d": 17.000000178813934,
+    "h": 22.99999942382177
+  },
+  {
+    "id": "manor-v2-tall",
+    "kind": "building-single",
+    "structure": "manor",
+    "wonderId": null,
+    "variant": 2,
+    "tall": true,
+    "floors": null,
+    "file": "manor-v2-tall.png",
+    "pxW": 277,
+    "pxH": 340,
+    "w": 21.999999029295786,
+    "d": 17.000000178813934,
+    "h": 24.99999978712627
   },
   {
     "id": "factory-v0-short",
@@ -248,11 +308,11 @@
     "tall": false,
     "floors": null,
     "file": "factory-v0-short.png",
-    "pxW": 340,
-    "pxH": 337,
-    "w": 9.999999900658926,
-    "d": 6.999999923365457,
-    "h": 5.999999741713206
+    "pxW": 312,
+    "pxH": 340,
+    "w": 27.000000150430772,
+    "d": 16.000000422909146,
+    "h": 21.99999924216952
   },
   {
     "id": "factory-v0-tall",
@@ -263,11 +323,11 @@
     "tall": true,
     "floors": null,
     "file": "factory-v0-tall.png",
-    "pxW": 253,
+    "pxW": 287,
     "pxH": 340,
-    "w": 8.000000105017708,
-    "d": 5.999999741713206,
-    "h": 9.999999900658926
+    "w": 24.99999978712627,
+    "d": 15.000000241256895,
+    "h": 23.99999960547402
   },
   {
     "id": "factory-v1-short",
@@ -278,11 +338,11 @@
     "tall": false,
     "floors": null,
     "file": "factory-v1-short.png",
-    "pxW": 276,
+    "pxW": 308,
     "pxH": 340,
-    "w": 8.999999719006675,
-    "d": 5.999999741713206,
-    "h": 8.999999719006675
+    "w": 27.000000150430772,
+    "d": 15.000000241256895,
+    "h": 21.99999924216952
   },
   {
     "id": "factory-v1-tall",
@@ -293,11 +353,11 @@
     "tall": true,
     "floors": null,
     "file": "factory-v1-tall.png",
-    "pxW": 262,
+    "pxW": 291,
     "pxH": 340,
-    "w": 8.000000105017708,
-    "d": 6.999999923365457,
-    "h": 9.999999900658926
+    "w": 24.99999978712627,
+    "d": 16.000000422909146,
+    "h": 23.99999960547402
   },
   {
     "id": "dome-v0-short",
@@ -308,11 +368,11 @@
     "tall": false,
     "floors": null,
     "file": "dome-v0-short.png",
-    "pxW": 284,
-    "pxH": 340,
-    "w": 8.000000105017708,
-    "d": 8.000000105017708,
-    "h": 8.999999719006675
+    "pxW": 340,
+    "pxH": 302,
+    "w": 20.999999060517265,
+    "d": 22.99999942382177,
+    "h": 14.000000059604645
   },
   {
     "id": "dome-v1-short",
@@ -323,11 +383,11 @@
     "tall": false,
     "floors": null,
     "file": "dome-v1-short.png",
-    "pxW": 282,
-    "pxH": 340,
-    "w": 6.999999923365457,
-    "d": 6.999999923365457,
-    "h": 8.000000105017708
+    "pxW": 340,
+    "pxH": 306,
+    "w": 18.99999983253933,
+    "d": 20.999999060517265,
+    "h": 12.999999877952394
   },
   {
     "id": "tower-v0-f4",
@@ -338,11 +398,11 @@
     "tall": null,
     "floors": 4,
     "file": "tower-v0-f4.png",
-    "pxW": 270,
+    "pxW": 226,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 5
+    "w": 11,
+    "d": 11,
+    "h": 20
   },
   {
     "id": "tower-v0-f4-glow",
@@ -353,11 +413,11 @@
     "tall": null,
     "floors": 4,
     "file": "tower-v0-f4-glow.png",
-    "pxW": 270,
+    "pxW": 226,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 5
+    "w": 11,
+    "d": 11,
+    "h": 20
   },
   {
     "id": "tower-v0-f6",
@@ -368,11 +428,11 @@
     "tall": null,
     "floors": 6,
     "file": "tower-v0-f6.png",
-    "pxW": 255,
+    "pxW": 203,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 7
+    "w": 12,
+    "d": 12,
+    "h": 26.000000000000004
   },
   {
     "id": "tower-v0-f6-glow",
@@ -383,11 +443,11 @@
     "tall": null,
     "floors": 6,
     "file": "tower-v0-f6-glow.png",
-    "pxW": 255,
+    "pxW": 203,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 7
+    "w": 12,
+    "d": 12,
+    "h": 26.000000000000004
   },
   {
     "id": "tower-v0-f9",
@@ -398,11 +458,11 @@
     "tall": null,
     "floors": 9,
     "file": "tower-v0-f9.png",
-    "pxW": 187,
+    "pxW": 160,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 10
+    "w": 11,
+    "d": 11,
+    "h": 35.00000000000001
   },
   {
     "id": "tower-v0-f9-glow",
@@ -413,11 +473,11 @@
     "tall": null,
     "floors": 9,
     "file": "tower-v0-f9-glow.png",
-    "pxW": 187,
+    "pxW": 160,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 10
+    "w": 11,
+    "d": 11,
+    "h": 35.00000000000001
   },
   {
     "id": "tower-v0-f13",
@@ -428,11 +488,11 @@
     "tall": null,
     "floors": 13,
     "file": "tower-v0-f13.png",
-    "pxW": 174,
+    "pxW": 147,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 14
+    "w": 13,
+    "d": 13,
+    "h": 47.00000000000001
   },
   {
     "id": "tower-v0-f13-glow",
@@ -443,11 +503,11 @@
     "tall": null,
     "floors": 13,
     "file": "tower-v0-f13-glow.png",
-    "pxW": 174,
+    "pxW": 147,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 14
+    "w": 13,
+    "d": 13,
+    "h": 47.00000000000001
   },
   {
     "id": "tower-v1-f4",
@@ -458,11 +518,11 @@
     "tall": null,
     "floors": 4,
     "file": "tower-v1-f4.png",
-    "pxW": 298,
+    "pxW": 243,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 5
+    "w": 12,
+    "d": 13,
+    "h": 20
   },
   {
     "id": "tower-v1-f4-glow",
@@ -473,11 +533,11 @@
     "tall": null,
     "floors": 4,
     "file": "tower-v1-f4-glow.png",
-    "pxW": 298,
+    "pxW": 243,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 5
+    "w": 12,
+    "d": 13,
+    "h": 20
   },
   {
     "id": "tower-v1-f6",
@@ -488,11 +548,11 @@
     "tall": null,
     "floors": 6,
     "file": "tower-v1-f6.png",
-    "pxW": 242,
+    "pxW": 203,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 7
+    "w": 13,
+    "d": 11,
+    "h": 26.000000000000004
   },
   {
     "id": "tower-v1-f6-glow",
@@ -503,11 +563,11 @@
     "tall": null,
     "floors": 6,
     "file": "tower-v1-f6-glow.png",
-    "pxW": 242,
+    "pxW": 203,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 7
+    "w": 13,
+    "d": 11,
+    "h": 26.000000000000004
   },
   {
     "id": "tower-v1-f9",
@@ -518,11 +578,11 @@
     "tall": null,
     "floors": 9,
     "file": "tower-v1-f9.png",
-    "pxW": 212,
+    "pxW": 173,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 10
+    "w": 12,
+    "d": 13,
+    "h": 35.00000000000001
   },
   {
     "id": "tower-v1-f9-glow",
@@ -533,11 +593,11 @@
     "tall": null,
     "floors": 9,
     "file": "tower-v1-f9-glow.png",
-    "pxW": 212,
+    "pxW": 173,
     "pxH": 340,
-    "w": 5,
-    "d": 5,
-    "h": 10
+    "w": 12,
+    "d": 13,
+    "h": 35.00000000000001
   },
   {
     "id": "tower-v1-f13",
@@ -548,11 +608,11 @@
     "tall": null,
     "floors": 13,
     "file": "tower-v1-f13.png",
-    "pxW": 153,
+    "pxW": 136,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 14
+    "w": 11,
+    "d": 12,
+    "h": 47.00000000000001
   },
   {
     "id": "tower-v1-f13-glow",
@@ -563,11 +623,11 @@
     "tall": null,
     "floors": 13,
     "file": "tower-v1-f13-glow.png",
-    "pxW": 153,
+    "pxW": 136,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 14
+    "w": 11,
+    "d": 12,
+    "h": 47.00000000000001
   },
   {
     "id": "arcology-v0-f6",
@@ -578,11 +638,11 @@
     "tall": null,
     "floors": 6,
     "file": "arcology-v0-f6.png",
-    "pxW": 228,
+    "pxW": 219,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 7
+    "w": 13,
+    "d": 13,
+    "h": 25.000000000000004
   },
   {
     "id": "arcology-v0-f6-glow",
@@ -593,11 +653,11 @@
     "tall": null,
     "floors": 6,
     "file": "arcology-v0-f6-glow.png",
-    "pxW": 228,
+    "pxW": 219,
     "pxH": 340,
-    "w": 4,
-    "d": 4,
-    "h": 7
+    "w": 13,
+    "d": 13,
+    "h": 25.000000000000004
   },
   {
     "id": "arcology-v0-f9",
@@ -608,11 +668,11 @@
     "tall": null,
     "floors": 9,
     "file": "arcology-v0-f9.png",
-    "pxW": 200,
+    "pxW": 185,
     "pxH": 340,
-    "w": 4,
-    "d": 5,
-    "h": 10
+    "w": 13,
+    "d": 14,
+    "h": 34.00000000000001
   },
   {
     "id": "arcology-v0-f9-glow",
@@ -623,11 +683,11 @@
     "tall": null,
     "floors": 9,
     "file": "arcology-v0-f9-glow.png",
-    "pxW": 200,
+    "pxW": 185,
     "pxH": 340,
-    "w": 4,
-    "d": 5,
-    "h": 10
+    "w": 13,
+    "d": 14,
+    "h": 34.00000000000001
   },
   {
     "id": "arcology-v0-f12",
@@ -638,11 +698,11 @@
     "tall": null,
     "floors": 12,
     "file": "arcology-v0-f12.png",
-    "pxW": 171,
+    "pxW": 167,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 13
+    "w": 15,
+    "d": 14,
+    "h": 43.00000000000001
   },
   {
     "id": "arcology-v0-f12-glow",
@@ -653,11 +713,11 @@
     "tall": null,
     "floors": 12,
     "file": "arcology-v0-f12-glow.png",
-    "pxW": 171,
+    "pxW": 167,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 13
+    "w": 15,
+    "d": 14,
+    "h": 43.00000000000001
   },
   {
     "id": "arcology-v0-f16",
@@ -668,11 +728,11 @@
     "tall": null,
     "floors": 16,
     "file": "arcology-v0-f16.png",
-    "pxW": 146,
+    "pxW": 139,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 17
+    "w": 14,
+    "d": 14,
+    "h": 55.00000000000001
   },
   {
     "id": "arcology-v0-f16-glow",
@@ -683,11 +743,11 @@
     "tall": null,
     "floors": 16,
     "file": "arcology-v0-f16-glow.png",
-    "pxW": 146,
+    "pxW": 139,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 17
+    "w": 14,
+    "d": 14,
+    "h": 55.00000000000001
   },
   {
     "id": "arcology-v1-f6",
@@ -698,11 +758,11 @@
     "tall": null,
     "floors": 6,
     "file": "arcology-v1-f6.png",
-    "pxW": 242,
+    "pxW": 234,
     "pxH": 340,
-    "w": 4,
-    "d": 5,
-    "h": 7
+    "w": 14,
+    "d": 15,
+    "h": 25.000000000000004
   },
   {
     "id": "arcology-v1-f6-glow",
@@ -713,11 +773,11 @@
     "tall": null,
     "floors": 6,
     "file": "arcology-v1-f6-glow.png",
-    "pxW": 242,
+    "pxW": 234,
     "pxH": 340,
-    "w": 4,
-    "d": 5,
-    "h": 7
+    "w": 14,
+    "d": 15,
+    "h": 25.000000000000004
   },
   {
     "id": "arcology-v1-f9",
@@ -728,11 +788,11 @@
     "tall": null,
     "floors": 9,
     "file": "arcology-v1-f9.png",
-    "pxW": 200,
+    "pxW": 190,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 10
+    "w": 15,
+    "d": 13,
+    "h": 34.00000000000001
   },
   {
     "id": "arcology-v1-f9-glow",
@@ -743,11 +803,11 @@
     "tall": null,
     "floors": 9,
     "file": "arcology-v1-f9-glow.png",
-    "pxW": 200,
+    "pxW": 190,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 10
+    "w": 15,
+    "d": 13,
+    "h": 34.00000000000001
   },
   {
     "id": "arcology-v1-f12",
@@ -758,11 +818,11 @@
     "tall": null,
     "floors": 12,
     "file": "arcology-v1-f12.png",
-    "pxW": 171,
+    "pxW": 160,
     "pxH": 340,
-    "w": 4,
-    "d": 5,
-    "h": 13
+    "w": 13,
+    "d": 14,
+    "h": 43.00000000000001
   },
   {
     "id": "arcology-v1-f12-glow",
@@ -773,11 +833,11 @@
     "tall": null,
     "floors": 12,
     "file": "arcology-v1-f12-glow.png",
-    "pxW": 171,
+    "pxW": 160,
     "pxH": 340,
-    "w": 4,
-    "d": 5,
-    "h": 13
+    "w": 13,
+    "d": 14,
+    "h": 43.00000000000001
   },
   {
     "id": "arcology-v1-f16",
@@ -788,11 +848,11 @@
     "tall": null,
     "floors": 16,
     "file": "arcology-v1-f16.png",
-    "pxW": 146,
+    "pxW": 142,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 17
+    "w": 15,
+    "d": 14,
+    "h": 55.00000000000001
   },
   {
     "id": "arcology-v1-f16-glow",
@@ -803,11 +863,11 @@
     "tall": null,
     "floors": 16,
     "file": "arcology-v1-f16-glow.png",
-    "pxW": 146,
+    "pxW": 142,
     "pxH": 340,
-    "w": 5,
-    "d": 4,
-    "h": 17
+    "w": 15,
+    "d": 14,
+    "h": 55.00000000000001
   },
   {
     "id": "wonder-sun-tomb",
@@ -818,7 +878,7 @@
     "tall": null,
     "floors": null,
     "file": "wonder-sun-tomb.png",
-    "pxW": 309,
+    "pxW": 321,
     "pxH": 340,
     "w": 10.95238072531564,
     "d": 10.95238072531564,
@@ -834,7 +894,7 @@
     "floors": null,
     "file": "wonder-standing-stones.png",
     "pxW": 340,
-    "pxH": 299,
+    "pxH": 280,
     "w": 12.619047619047619,
     "d": 12.619047619047619,
     "h": 6.1904759634108775
@@ -848,7 +908,7 @@
     "tall": null,
     "floors": null,
     "file": "wonder-sky-stair.png",
-    "pxW": 315,
+    "pxW": 328,
     "pxH": 340,
     "w": 12.380951926821755,
     "d": 9.523809523809524,
@@ -864,7 +924,7 @@
     "floors": null,
     "file": "wonder-colonnade.png",
     "pxW": 340,
-    "pxH": 301,
+    "pxH": 282,
     "w": 22.896791652087803,
     "d": 22.896791652087803,
     "h": 11.90476193314507
@@ -879,7 +939,7 @@
     "floors": null,
     "file": "wonder-endless-wall.png",
     "pxW": 340,
-    "pxH": 294,
+    "pxH": 275,
     "w": 18.0952380952381,
     "d": 2.380952380952381,
     "h": 4.666666757492792
@@ -894,7 +954,7 @@
     "floors": null,
     "file": "wonder-grand-arena.png",
     "pxW": 340,
-    "pxH": 300,
+    "pxH": 282,
     "w": 12.857143084208172,
     "d": 12.857143084208172,
     "h": 6.4285713718051
@@ -908,7 +968,7 @@
     "tall": null,
     "floors": null,
     "file": "wonder-great-cathedral.png",
-    "pxW": 272,
+    "pxW": 280,
     "pxH": 340,
     "w": 17.509310130000628,
     "d": 17.509310130000628,
@@ -923,7 +983,7 @@
     "tall": null,
     "floors": null,
     "file": "wonder-domed-basilica.png",
-    "pxW": 305,
+    "pxW": 317,
     "pxH": 340,
     "w": 13.33333310626802,
     "d": 13.33333310626802,
@@ -939,7 +999,7 @@
     "floors": null,
     "file": "wonder-crystal-hall.png",
     "pxW": 340,
-    "pxH": 304,
+    "pxH": 285,
     "w": 16.666666666666668,
     "d": 8.095238322303409,
     "h": 6.428571316812719
@@ -953,7 +1013,7 @@
     "tall": null,
     "floors": null,
     "file": "wonder-iron-spire.png",
-    "pxW": 248,
+    "pxW": 252,
     "pxH": 340,
     "w": 12.380951926821755,
     "d": 12.380951926821755,
@@ -969,7 +1029,7 @@
     "floors": null,
     "file": "wonder-world-skyport.png",
     "pxW": 340,
-    "pxH": 272,
+    "pxH": 252,
     "w": 19.047619047619047,
     "d": 9.523809523809524,
     "h": 4.761904761904762
@@ -998,10 +1058,175 @@
     "tall": null,
     "floors": null,
     "file": "wonder-arcology-core.png",
-    "pxW": 300,
+    "pxW": 311,
     "pxH": 340,
     "w": 12.380951926821755,
     "d": 12.380951926821755,
     "h": 12.380951926821755
+  },
+  {
+    "id": "prop-tree-a",
+    "kind": "prop",
+    "structure": "tree-a",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-tree-a.png",
+    "pxW": 279,
+    "pxH": 340,
+    "w": 10.999999514647893,
+    "d": 9.999999545869374,
+    "h": 12.999999877952394
+  },
+  {
+    "id": "prop-tree-b",
+    "kind": "prop",
+    "structure": "tree-b",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-tree-b.png",
+    "pxW": 205,
+    "pxH": 340,
+    "w": 7.999999750228156,
+    "d": 7.999999750228156,
+    "h": 16.99999946923483
+  },
+  {
+    "id": "prop-bush",
+    "kind": "prop",
+    "structure": "bush",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-bush.png",
+    "pxW": 340,
+    "pxH": 297,
+    "w": 6.999999923365457,
+    "d": 6.999999923365457,
+    "h": 3.999999946071988
+  },
+  {
+    "id": "prop-well",
+    "kind": "prop",
+    "structure": "well",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-well.png",
+    "pxW": 263,
+    "pxH": 340,
+    "w": 9.000000073796228,
+    "d": 6.999999923365457,
+    "h": 10.999999514647893
+  },
+  {
+    "id": "prop-fence",
+    "kind": "prop",
+    "structure": "fence",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-fence.png",
+    "pxW": 340,
+    "pxH": 305,
+    "w": 11.999999696300144,
+    "d": 0.9999999687785195,
+    "h": 3.999999946071988
+  },
+  {
+    "id": "prop-farmplot",
+    "kind": "prop",
+    "structure": "farmplot",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-farmplot.png",
+    "pxW": 340,
+    "pxH": 236,
+    "w": 14.000000059604645,
+    "d": 10.999999514647893,
+    "h": 2.9999999063355585
+  },
+  {
+    "id": "prop-lamp",
+    "kind": "prop",
+    "structure": "lamp",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-lamp.png",
+    "pxW": 147,
+    "pxH": 340,
+    "w": 2.9999999772934687,
+    "d": 2.9999999772934687,
+    "h": 10.999999514647893
+  },
+  {
+    "id": "prop-lamp-neon",
+    "kind": "prop",
+    "structure": "lamp-neon",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-lamp-neon.png",
+    "pxW": 156,
+    "pxH": 340,
+    "w": 2.9999999772934687,
+    "d": 2.9999999772934687,
+    "h": 9.999999900658926
+  },
+  {
+    "id": "prop-stall",
+    "kind": "prop",
+    "structure": "stall",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-stall.png",
+    "pxW": 340,
+    "pxH": 337,
+    "w": 10.999999869437445,
+    "d": 9.000000073796228,
+    "h": 8.000000105017708
+  },
+  {
+    "id": "prop-crates",
+    "kind": "prop",
+    "structure": "crates",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-crates.png",
+    "pxW": 286,
+    "pxH": 340,
+    "w": 8.000000105017708,
+    "d": 3.999999946071988,
+    "h": 6.999999923365457
+  },
+  {
+    "id": "prop-boat",
+    "kind": "prop",
+    "structure": "boat",
+    "wonderId": null,
+    "variant": null,
+    "tall": null,
+    "floors": null,
+    "file": "prop-boat.png",
+    "pxW": 340,
+    "pxH": 242,
+    "w": 10.999999514647893,
+    "d": 3.999999946071988,
+    "h": 1.999999937557039
   }
 ]
