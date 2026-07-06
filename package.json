@@ -1,0 +1,21 @@
+{
+  "name": "aeterna",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "영원의 행성 (Aeterna) — 불멸자 문명 관전 시뮬레이션, 실시간 3D 리부트",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.0",
+    "playwright": "^1.61.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.3"
+  }
+}
