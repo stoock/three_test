@@ -92,6 +92,15 @@ body,
   gap: 10px;
   margin-bottom: 18px;
 }
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.creation .label {
+  margin-top: 0;
+}
 .disp-card {
   border: 1px solid var(--panel-border);
   border-radius: 10px;
@@ -290,6 +299,9 @@ button.primary:disabled {
 }
 .entry.milestone {
   border-color: rgba(255, 217, 138, 0.6);
+}
+.entry.succession {
+  border-color: rgba(255, 138, 209, 0.55);
 }
 .entry .meta {
   font-size: 11px;

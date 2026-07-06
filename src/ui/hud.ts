@@ -1,13 +1,14 @@
 import { DISPOSITIONS, getDisposition } from '../engine/dispositions';
 import { eraAt, techThreshold } from '../engine/eras';
-import type { DispositionId, LogEntry, LogKind, SimState } from '../engine/types';
+import type { DispositionId, LifeMode, LogEntry, LogKind, SimState } from '../engine/types';
 import { formatNum, formatYear } from './format';
 
 export interface HudCallbacks {
-  onCreate(name: string, dispositionId: DispositionId): void;
+  onCreate(name: string, dispositionId: DispositionId, mode: LifeMode): void;
   onSpeed(mult: number): void;
   onSave(): void;
   onReset(): void;
+  onFocusCapital(): void;
 }
 
 const SPEEDS = [0, 1, 10, 100, 1000] as const;
@@ -23,6 +24,13 @@ const FILTERS: { key: LogKind | 'all'; label: string }[] = [
   { key: 'era', label: '시대' },
   { key: 'milestone', label: '이정표' },
   { key: 'event', label: '사건' },
+  { key: 'succession', label: '계승' },
+];
+
+const LIFE_MODES: { id: LifeMode; emoji: string; name: string; desc: string }[] = [
+  { id: 'reincarnate', emoji: '🕯️', name: '환생자', desc: '죽음마다 새 이름으로 태어난다. 기억 일부를 계승하고, 성향이 표류할 수 있다.' },
+  { id: 'dynasty', emoji: '👑', name: '왕조', desc: '핏줄로 이어지는 가문. 유산을 물려주지만 후계 분쟁의 위험이 있다.' },
+  { id: 'immortal', emoji: '♾️', name: '불멸자', desc: '한 몸으로 영원을 산다. 고요하고 흔들림 없는 관전.' },
 ];
 
 /** DOM 기반 HUD — 생성 화면 / 상태 패널 / 시간 제어 / 연대기 */
@@ -35,6 +43,7 @@ export class Hud {
   private toastEl!: HTMLElement;
   private filter: LogKind | 'all' = 'all';
   private renderedIds = new Set<number>();
+  private lastState: SimState | null = null;
   private toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
@@ -53,15 +62,33 @@ export class Hud {
     overlay.innerHTML = `
       <div class="panel creation">
         <h1>영원의 행성 <span style="color:var(--text-dim);font-size:15px">Aeterna</span></h1>
-        <p class="sub">불멸자의 이름을 짓고 성향을 고르세요. 그의 행성이 함께 태어납니다.</p>
-        <input type="text" maxlength="24" placeholder="불멸자의 이름" />
+        <p class="sub">이름을 짓고, 삶의 방식과 성향을 고르세요. 영혼의 행성이 함께 태어납니다.</p>
+        <input type="text" maxlength="24" placeholder="영혼의 이름 (가문명)" />
+        <div class="label" style="margin-bottom:6px">삶의 방식</div>
+        <div class="mode-grid"></div>
+        <div class="label" style="margin-bottom:6px">성향</div>
         <div class="disp-grid"></div>
         <button class="primary" disabled>행성에 강림하기</button>
       </div>`;
     const input = overlay.querySelector('input')!;
     const grid = overlay.querySelector('.disp-grid')!;
+    const modeGrid = overlay.querySelector('.mode-grid')!;
     const startBtn = overlay.querySelector('button.primary') as HTMLButtonElement;
     let selected: DispositionId | null = null;
+    let selectedMode: LifeMode = 'reincarnate';
+
+    for (const m of LIFE_MODES) {
+      const card = document.createElement('div');
+      card.className = 'disp-card mode-card';
+      if (m.id === selectedMode) card.classList.add('selected');
+      card.innerHTML = `<div class="emoji">${m.emoji}</div><div class="name">${m.name}</div><div class="desc">${m.desc}</div>`;
+      card.addEventListener('click', () => {
+        selectedMode = m.id;
+        modeGrid.querySelectorAll('.disp-card').forEach((c) => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+      modeGrid.appendChild(card);
+    }
 
     for (const d of DISPOSITIONS) {
       const card = document.createElement('div');
@@ -80,7 +107,7 @@ export class Hud {
     };
     input.addEventListener('input', refresh);
     startBtn.addEventListener('click', () => {
-      if (input.value.trim() && selected) this.cb.onCreate(input.value.trim(), selected);
+      if (input.value.trim() && selected) this.cb.onCreate(input.value.trim(), selected, selectedMode);
     });
 
     this.root.appendChild(overlay);
@@ -113,6 +140,8 @@ export class Hud {
         b.classList.add('active');
         this.entriesEl.innerHTML = '';
         this.renderedIds.clear();
+        // 일시정지 중에도 즉시 재렌더
+        if (this.lastState) this.updateLog(this.lastState);
       });
       filters.appendChild(b);
     }
@@ -136,6 +165,12 @@ export class Hud {
     const spacer = document.createElement('div');
     spacer.className = 'spacer';
     timebar.appendChild(spacer);
+    const capitalBtn = document.createElement('button');
+    capitalBtn.className = 'ghost';
+    capitalBtn.textContent = '📍 수도';
+    capitalBtn.title = '문명의 중심(수도) 상공으로 이동';
+    capitalBtn.addEventListener('click', () => this.cb.onFocusCapital());
+    timebar.appendChild(capitalBtn);
     const saveBtn = document.createElement('button');
     saveBtn.className = 'ghost';
     saveBtn.textContent = '💾 저장';
@@ -169,9 +204,17 @@ export class Hud {
     const rows = STAT_LABELS.map(
       ([k, label]) => `<div class="stat-row"><span>${label}</span><b>${formatNum(state.stats[k])}</b></div>`,
     ).join('');
+    const lifeAge = Math.floor(state.year - state.incarnationYear);
+    const mode = state.character.mode;
+    const ageLine =
+      mode === 'immortal'
+        ? `나이 ${formatYear(state.year)} · 불멸`
+        : mode === 'reincarnate'
+          ? `${formatNum(state.incarnation)}번째 삶 · 이번 생 ${lifeAge}세 · 영혼 ${formatYear(state.year)}`
+          : `${formatNum(state.incarnation)}대 · 재위 ${lifeAge}년 · 가문 ${formatYear(state.year)}`;
     this.statusEl.innerHTML = `
       <div class="who"><span class="nm">${escapeHtml(state.character.name)}</span><span class="dp">${disp.emoji} ${disp.name}</span></div>
-      <div class="age">나이 ${formatYear(state.year)} · 불멸</div>
+      <div class="age">${ageLine}</div>
       <div class="era">${era.emoji} ${era.name}</div>
       <div class="bar"><i style="width:${techPct}%"></i></div>
       <div class="label">능력치</div>
@@ -183,6 +226,7 @@ export class Hud {
 
   /** 로그 전체를 필터에 맞춰 증분 렌더 */
   updateLog(state: SimState): void {
+    this.lastState = state;
     const visible = state.log.filter((e) => this.filter === 'all' || e.kind === this.filter);
     for (const entry of visible) {
       if (this.renderedIds.has(entry.id)) continue;

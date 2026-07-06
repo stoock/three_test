@@ -50,7 +50,15 @@ export function load(): SimState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.version !== 1 || !parsed.state?.character?.name) return null;
-    return parsed.state as SimState;
+    const state = parsed.state as SimState;
+    // v1 세이브(불멸 전용) 마이그레이션 + JSON이 Infinity를 null로 만드는 문제 보정
+    const ch = state.character;
+    if (!ch.mode) ch.mode = 'immortal';
+    if (!ch.lineage) ch.lineage = ch.name;
+    state.incarnation ??= 1;
+    state.incarnationYear ??= 0;
+    if (state.nextDeathYear == null) state.nextDeathYear = Infinity;
+    return state;
   } catch {
     return null;
   }

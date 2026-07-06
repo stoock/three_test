@@ -18,7 +18,9 @@ export class World {
   private civ: Civilization | null = null;
   private avatar: THREE.Mesh | null = null;
   private avatarLight: THREE.PointLight | null = null;
+  private camLight: THREE.PointLight;
   private elapsed = 0;
+  private tween: { fromDir: THREE.Vector3; toDir: THREE.Vector3; fromR: number; toR: number; t: number } | null = null;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -33,7 +35,8 @@ export class World {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.06;
-    this.controls.minDistance = PLANET_RADIUS * 1.4;
+    // 지붕 높이 바로 위까지 접근 가능 — 건물 디테일 관찰용 (건물 관통 방지선)
+    this.controls.minDistance = PLANET_RADIUS * 1.27;
     this.controls.maxDistance = PLANET_RADIUS * 8;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 0.35;
@@ -46,6 +49,11 @@ export class World {
     this.sun.position.set(60, 18, 0);
     this.sunPivot.add(this.sun);
     this.scene.add(this.sunPivot);
+
+    // 근접 관찰용 보조광 — 멀리서는 꺼지고, 표면에 다가가면 은은하게 켜진다
+    this.camLight = new THREE.PointLight(0x9fb6e8, 0, 30, 1.6);
+    this.camera.add(this.camLight);
+    this.scene.add(this.camera);
 
     this.scene.add(makeStars());
 
@@ -92,7 +100,33 @@ export class World {
     this.sunPivot.rotation.y += dtReal * ((Math.PI * 2) / 80);
     this.civ?.update(dtReal);
     this.moveAvatar(this.elapsed);
-    this.controls.update();
+
+    // 수도 이동 트윈
+    if (this.tween) {
+      const tw = this.tween;
+      tw.t = Math.min(1, tw.t + dtReal / 1.1);
+      const e = tw.t < 0.5 ? 2 * tw.t * tw.t : 1 - (-2 * tw.t + 2) ** 2 / 2; // easeInOutQuad
+      const axis = new THREE.Vector3().crossVectors(tw.fromDir, tw.toDir);
+      const angle = tw.fromDir.angleTo(tw.toDir);
+      const dir = tw.fromDir.clone();
+      if (axis.lengthSq() > 1e-8) dir.applyAxisAngle(axis.normalize(), angle * e);
+      this.camera.position.copy(dir.multiplyScalar(tw.fromR + (tw.toR - tw.fromR) * e));
+      this.camera.lookAt(0, 0, 0);
+      if (tw.t >= 1) {
+        this.tween = null;
+        this.controls.enabled = true;
+      }
+    }
+
+    // 표면에 가까울수록 회전/줌을 느리게 — 저공 관찰이 조작 가능하도록
+    const dist = this.camera.position.length();
+    const closeness = THREE.MathUtils.clamp((dist - PLANET_RADIUS * 1.15) / (PLANET_RADIUS * 1.5), 0.06, 1);
+    this.controls.rotateSpeed = closeness;
+    this.controls.zoomSpeed = 0.4 + closeness * 0.8;
+    this.controls.autoRotate = !this.tween && dist > PLANET_RADIUS * 2.1;
+    this.camLight.intensity = (1 - closeness) ** 2 * 3;
+
+    if (!this.tween) this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -111,6 +145,19 @@ export class World {
       .normalize();
     const surfaceR = this.planet.capital.length();
     this.avatar.position.copy(wob.multiplyScalar(surfaceR + 0.5 + Math.sin(t * 1.7) * 0.06));
+  }
+
+  /** 카메라를 수도(문명 중심) 상공으로 부드럽게 이동 */
+  focusCapital(): void {
+    if (!this.planet) return;
+    this.controls.enabled = false;
+    this.tween = {
+      fromDir: this.camera.position.clone().normalize(),
+      toDir: this.planet.capital.clone().normalize(),
+      fromR: this.camera.position.length(),
+      toR: PLANET_RADIUS * 1.42,
+      t: 0,
+    };
   }
 
   /** 현재 프레임을 작은 JPEG dataURL로 캡처 — 연대기 '사진' */

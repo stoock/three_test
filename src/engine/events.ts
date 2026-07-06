@@ -48,6 +48,22 @@ const EPOCH_EVENTS: readonly { maxEra: number; texts: readonly string[] }[] = [
   },
 ];
 
+/** 환생자의 전생 기억 / 왕조의 유산 사건 */
+const MEMORY_EVENTS: Record<'reincarnate' | 'dynasty', readonly string[]> = {
+  reincarnate: [
+    '전생의 기억이 홍수처럼 밀려들었다',
+    '낯선 골목에서 이유 없는 그리움에 붙들렸다',
+    '꿈에서 지난 삶의 벗을 다시 만났다',
+    '오래전 자신이 지은 건물의 주춧돌을 알아보았다',
+  ],
+  dynasty: [
+    '서고에서 선대의 밀서를 발견했다',
+    '가문의 문장을 새로 벼렸다',
+    '선조의 묘를 이장하며 오래된 맹세를 되새겼다',
+    '선대가 남긴 미완의 설계도를 이어 그렸다',
+  ],
+};
+
 const STAT_NAMES: Record<StatId, string> = {
   knowledge: '지식',
   vigor: '체력',
@@ -69,10 +85,15 @@ export interface EventResult {
 export function rollEvent(state: SimState, rng: Rng): EventResult {
   const disp = getDisposition(state.character.dispositionId);
 
-  const useTheme = rng() < 0.45;
-  const text = useTheme
-    ? pick(rng, disp.themes)
-    : pick(rng, (EPOCH_EVENTS.find((e) => state.eraIndex <= e.maxEra) ?? EPOCH_EVENTS[EPOCH_EVENTS.length - 1]).texts);
+  const mode = state.character.mode;
+  const canRemember = mode !== 'immortal' && state.incarnation > 1;
+  const roll = rng();
+  const text =
+    canRemember && roll < 0.18
+      ? pick(rng, MEMORY_EVENTS[mode])
+      : roll < 0.55
+        ? pick(rng, disp.themes)
+        : pick(rng, (EPOCH_EVENTS.find((e) => state.eraIndex <= e.maxEra) ?? EPOCH_EVENTS[EPOCH_EVENTS.length - 1]).texts);
 
   // 운명(카오스)과 정신이 성패를 흔든다
   const spiritEdge = Math.min(0.15, Math.log10(1 + state.stats.spirit) * 0.03);

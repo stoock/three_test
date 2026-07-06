@@ -24,7 +24,10 @@ export interface Disposition {
   themes: readonly string[];
 }
 
-export type LogKind = 'birth' | 'era' | 'event' | 'milestone';
+/** 삶의 방식 — 불멸 / 환생 / 왕조 승계 */
+export type LifeMode = 'immortal' | 'reincarnate' | 'dynasty';
+
+export type LogKind = 'birth' | 'era' | 'event' | 'milestone' | 'succession';
 
 export interface LogEntry {
   id: number;
@@ -38,9 +41,13 @@ export interface LogEntry {
 }
 
 export interface Character {
+  /** 현재 삶의 이름 (환생/승계 시 바뀜) */
   name: string;
+  /** 최초의 이름이자 가문/영혼의 이름 */
+  lineage: string;
   dispositionId: DispositionId;
   seed: number;
+  mode: LifeMode;
 }
 
 export interface SimState {
@@ -55,6 +62,12 @@ export interface SimState {
   /** 로지스틱 사상 '운명' (0..1) — 사건 결과를 흔드는 카오스 */
   fate: number;
   nextEventYear: number;
+  /** 몇 번째 삶(환생) 또는 몇 대(왕조)인가 — 불멸이면 항상 1 */
+  incarnation: number;
+  /** 현재 삶이 시작된 연도 */
+  incarnationYear: number;
+  /** 현재 삶이 끝나는 연도 (불멸이면 Infinity) */
+  nextDeathYear: number;
   milestonesDone: string[];
   log: LogEntry[];
   logSeq: number;
