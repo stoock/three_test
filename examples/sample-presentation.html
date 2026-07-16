@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>샘플 프리젠테이션 — html-presentation-wiki 데모</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <style>
+    .reveal h1, .reveal h2 { text-transform: none; }
+    .reveal .accent { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      <section>
+        <h1>샘플 프리젠테이션</h1>
+        <p class="accent">html-presentation-wiki 스킬 데모 덱</p>
+      </section>
+      <section>
+        <h2>이 파일의 특징</h2>
+        <ul>
+          <li>단일 HTML 파일 (self-contained)</li>
+          <li>reveal.js — CDN 로드, 로컬 의존성 없음</li>
+          <li>wiki에 그대로 업로드 가능</li>
+        </ul>
+      </section>
+      <section>
+        <h2>발행 방법</h2>
+        <pre><code>bash scripts/publish_to_wiki.sh \
+  --file examples/sample-presentation.html \
+  --title "샘플 프리젠테이션"</code></pre>
+      </section>
+      <section>
+        <h2>끝 🎉</h2>
+        <p>wiki의 Presentations 인덱스에서 확인하세요.</p>
+      </section>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+  <script>Reveal.initialize({ hash: true });</script>
+</body>
+</html>
