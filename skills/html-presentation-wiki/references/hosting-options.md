@@ -35,13 +35,15 @@ audience), host the HTML in the main repo instead of/in addition to the wiki:
    run with any URL substituted afterwards, or just edit the generated page
    to point its "Open in browser" link at the Pages URL).
 
-## 3. Non-GitHub wikis
+## 3. Confluence
 
-The bundled scripts target GitHub Wiki only. For other wikis, guide the user:
+Use the bundled `scripts/publish_to_confluence.py` — see
+[confluence.md](confluence.md) for mechanics. Best inline experience:
+host the deck on GitHub Pages (section 2 above) and pass that URL as
+`--embed-url` so the Confluence page embeds it via the iframe macro.
 
-- **Confluence**: upload the HTML as a page attachment via REST API
-  (`POST /rest/api/content/{id}/child/attachment`), then embed with the
-  "HTML macro" (if enabled) or link the attachment for download.
+## 4. Other wikis (no bundled script)
+
 - **MediaWiki**: raw HTML is disabled by default; upload as a file
   (`Special:Upload`, may need `$wgFileExtensions[] = 'html';`) and link it,
   or host externally and link.

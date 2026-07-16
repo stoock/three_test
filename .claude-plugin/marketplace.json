@@ -4,16 +4,16 @@
     "name": "stoock"
   },
   "metadata": {
-    "description": "Claude Code plugin for publishing HTML presentations to a GitHub Wiki"
+    "description": "Claude Code plugin for publishing HTML presentations to Confluence or a GitHub Wiki"
   },
   "plugins": [
     {
       "name": "html-presentation-wiki",
       "source": "./",
-      "description": "Publish HTML presentations (reveal.js, impress.js, Marp, or any single-file deck) to a GitHub Wiki with viewer links, per-presentation pages, and an auto-maintained index.",
-      "version": "1.0.0",
+      "description": "Publish HTML presentations (reveal.js, impress.js, Marp, or any single-file deck) to Confluence (Cloud/Server/DC) or a GitHub Wiki — batch upload, per-presentation pages, attachments, iframe embeds, and an auto-maintained index.",
+      "version": "1.1.0",
       "license": "MIT",
-      "keywords": ["wiki", "github-wiki", "presentation", "slides", "html", "reveal.js", "publish"],
+      "keywords": ["wiki", "confluence", "github-wiki", "presentation", "slides", "html", "reveal.js", "publish"],
       "category": "productivity",
       "tags": ["presentations", "wiki", "publishing"]
     }

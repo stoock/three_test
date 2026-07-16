@@ -1,122 +1,137 @@
 ---
 name: html-presentation-wiki
 description: >-
-  Publish HTML presentation files (reveal.js, impress.js, Marp, or any
-  single-file HTML slide deck) to a GitHub Wiki. Use this skill whenever the
-  user asks to upload, publish, share, or attach an HTML presentation (slides,
-  slideshow, deck, 프리젠테이션, 발표자료) to a wiki, or asks to maintain a wiki
-  index of presentations. Handles wiki git cloning, viewer-link generation
-  (htmlpreview / raw.githack), per-presentation wiki pages, and an auto-updated
-  index page.
+  Publish HTML presentation files (reveal.js, impress.js, Marp, deck.js,
+  Shower, or any single-file HTML slide deck) to a wiki — Confluence
+  (Cloud/Server/DC) or GitHub Wiki. Use this skill whenever the user asks to
+  upload, publish, share, or attach an HTML presentation (slides, slideshow,
+  deck, 프리젠테이션, 발표자료) to Confluence or a wiki, including batches of
+  multiple files. Handles page creation/update, attachment upload, viewer
+  links, iframe embedding, and an auto-maintained index.
 license: MIT
 ---
 
-# HTML Presentation → GitHub Wiki Publisher
+# HTML Presentation → Wiki Publisher
 
-Publish a self-contained HTML presentation to a repository's GitHub Wiki and
-create/refresh wiki pages that make it viewable in one click.
+Publish self-contained HTML presentations to **Confluence** (primary target)
+or **GitHub Wiki**, creating pages that make each deck easy to find and open.
 
-## How it works (read this first)
+## Step 0 — Pick the target
 
-A GitHub Wiki is itself a git repository at
-`https://github.com/<owner>/<repo>.wiki.git`. Any file can be pushed to it,
-but GitHub serves non-Markdown files as `text/plain`, so a pushed `.html`
-file will not render on its own. This skill solves that by:
+- User says Confluence / an Atlassian URL is involved / `CONFLUENCE_BASE_URL`
+  is set → **Confluence workflow** below.
+- User says GitHub Wiki / the deck belongs to a GitHub repo's wiki →
+  **GitHub Wiki workflow** (further down).
+- Ambiguous → ask which wiki they mean.
 
-1. Pushing the HTML file into the wiki repo under `presentations/`.
-2. Creating a wiki page per presentation with **viewer links**
-   (htmlpreview.github.io and raw.githack.com re-serve the raw file with the
-   correct `Content-Type`) plus a raw download link and metadata.
-3. Maintaining a `Presentations` index page listing every published deck.
-
-Viewer links only work for **public** repositories. For private repos, see
-[references/hosting-options.md](references/hosting-options.md) (GitHub Pages
-is the recommended alternative there).
-
-## Workflow
-
-### Step 1 — Inspect the presentation
-
-Always inspect before publishing:
+## Step 1 — Inspect (both targets, always first)
 
 ```bash
 python3 scripts/inspect_presentation.py path/to/deck.html
 ```
 
-This prints JSON: detected framework, title, slide count, file size, external
-CDN resources, and — critically — **local file references** (`./img/x.png`,
-`css/style.css`, …). A wiki upload is a single file, so local references will
-break.
+Prints JSON: detected framework (reveal.js / impress.js / Marp / deck.js /
+Shower / generic), title, slide count, size, external CDN refs, and
+`local_refs` — relative file references that **break** after a single-file
+upload. If `local_refs` is non-empty, tell the user exactly which references
+break and get the deck self-contained before publishing (`--force`
+overrides). External `https://` CDN refs are fine.
 
-- If `local_refs` is non-empty: tell the user which references will break and
-  offer to inline them or ask for a self-contained export. Do not publish
-  broken decks silently (the script exits non-zero; `--force` overrides).
-- External `https://` CDN resources are fine — the deck is viewed online.
+---
 
-### Step 2 — Confirm the target repository
+## Confluence workflow
 
-The publish script auto-detects the repo from `git remote get-url origin`.
-If the current directory is not the intended repo (or has no remote), pass
-`--repo <owner>/<name>` explicitly. Never guess an owner/name — ask the user
-if it cannot be derived.
+### Key facts (set expectations with the user)
 
-### Step 3 — Publish
+- Confluence serves HTML attachments with `Content-Disposition: attachment`
+  → **downloads, never renders inline**. This is an Atlassian security
+  decision, not a bug to work around.
+- Confluence **Cloud has no HTML macro** (removed for security). Server/DC
+  has one but it is disabled by default.
+- Therefore the publishing pattern is: attach the HTML file + generate a
+  page with a download link and metadata. If the deck is *also* hosted
+  somewhere that serves `text/html` (GitHub Pages, S3, internal static
+  host), pass `--embed-url` to add an inline iframe view on the page.
+
+### Credentials
+
+Required environment variables (ask the user to set them; never echo values):
 
 ```bash
-bash scripts/publish_to_wiki.sh \
-  --file path/to/deck.html \
-  --title "Q3 Architecture Review" \
-  --description "One-line summary shown on the index page"
+export CONFLUENCE_BASE_URL="https://yoursite.atlassian.net/wiki"  # Cloud: keep /wiki
+export CONFLUENCE_EMAIL="user@example.com"      # Cloud auth pair
+export CONFLUENCE_API_TOKEN="..."               # id.atlassian.com → API tokens
+# — or, for Server/Data Center —
+export CONFLUENCE_PAT="..."                     # personal access token (Bearer)
 ```
 
-The script clones the wiki, runs the inspection, copies the file to
-`presentations/<slug>.html`, generates the wiki page and index via
-`scripts/generate_wiki_page.py`, commits, and pushes with retries
-(2s/4s/8s/16s backoff).
+### Publish (single file or batch)
 
-Useful flags:
+```bash
+# preview what will happen (no API calls)
+python3 scripts/publish_to_confluence.py deck1.html deck2.html \
+  --space DOCS --dry-run
+
+# publish
+python3 scripts/publish_to_confluence.py deck1.html deck2.html --space DOCS
+```
+
+Per file, the script creates or updates (same title = update, version bump)
+a page under an auto-created **"HTML Presentations"** index page — the index
+uses a `children` macro so it maintains itself — and uploads the HTML as the
+page's attachment, replacing prior versions.
 
 | Flag | Purpose |
 |------|---------|
-| `--repo owner/name` | Target repo when it can't be derived from `origin` |
-| `--page-name "My-Page"` | Override the wiki page name (default: slug of title) |
-| `--wiki-url <git-url>` | Override the wiki git URL entirely (testing, GHES) |
-| `--private` | Skip viewer links, emit download-only page for private repos |
-| `--force` | Publish even if local file references were detected |
+| `--space KEY` | Target space (required) |
+| `--title` | Page title, single file only (default: HTML `<title>`) |
+| `--description` | Intro sentence on the page |
+| `--embed-url URL` | Externally hosted copy → iframe embed section |
+| `--parent-title` / `--parent-id` | Custom parent instead of the default index |
+| `--dry-run` | Print the plan, call nothing |
+| `--force` | Publish despite local file references |
 
-### Step 4 — Handle the one common failure
+The script prints JSON with `page_url` per file — relay every URL to the
+user. Auth/permission/404 errors come with actionable hints; deeper
+troubleshooting: [references/confluence.md](references/confluence.md).
 
-If cloning the wiki fails with "repository not found", the wiki has never
-been initialized. GitHub only creates the underlying wiki git repo after the
-**first page is created in the web UI**. Tell the user to open
-`https://github.com/<owner>/<repo>/wiki`, click **Create the first page**,
-save it (content can be anything), then re-run the publish script. Other
-failures: see [references/github-wiki.md](references/github-wiki.md).
+### Offer the inline-view upgrade
 
-### Step 5 — Report results
+After a Confluence publish, if the repo is public on GitHub, offer to also
+host the deck on GitHub Pages and re-publish with `--embed-url` so the
+presentation plays inside the Confluence page. See
+[references/hosting-options.md](references/hosting-options.md).
 
-After a successful push, the script prints the final URLs. Relay all of them
-to the user:
+---
 
-- Wiki page: `https://github.com/<owner>/<repo>/wiki/<Page-Name>`
-- Live viewer link (public repos)
-- Raw download link
+## GitHub Wiki workflow
+
+GitHub Wiki is a git repo (`<owner>/<repo>.wiki.git`); raw files are served
+as `text/plain`, so pages get htmlpreview/githack viewer links instead
+(public repos only).
+
+```bash
+bash scripts/publish_to_wiki.sh --file deck.html --title "Q3 Review" \
+  [--repo owner/name] [--private] [--page-name Name] [--force]
+```
+
+Clones the wiki, publishes to `presentations/`, generates the page +
+`Presentations` index, pushes with retries. If cloning fails with
+"repository not found", the wiki was never initialized — the user must
+create the first page in the web UI once, then re-run. Details and failure
+table: [references/github-wiki.md](references/github-wiki.md).
+
+---
 
 ## Notes and edge cases
 
-- **File size**: warn above 10 MB (slow viewer loading); GitHub rejects files
-  over 100 MB. Suggest compressing embedded images if oversized.
-- **Updating an existing deck**: re-running publish with the same title
-  overwrites `presentations/<slug>.html` and refreshes the page — this is the
-  supported update path.
-- **Wiki page naming**: GitHub wiki page names come from the `.md` filename;
-  spaces become hyphens. The scripts already slugify safely.
-- **Don't hand-edit the index between markers**: `Presentations.md` content
-  between `<!-- presentations:begin -->` and `<!-- presentations:end -->` is
-  regenerated on every publish.
-- **Creating a deck from scratch**: this skill publishes existing HTML. If
-  the user first needs a presentation built, build a self-contained
-  reveal.js HTML file (CDN assets, no local files), then publish it.
-- **Non-GitHub wikis** (Confluence, MediaWiki, DokuWiki): out of scope for
-  the scripts; see [references/hosting-options.md](references/hosting-options.md)
-  for guidance to give the user.
+- **Multiple frameworks**: inspection auto-detects the framework; no flags
+  needed. Unknown frameworks publish fine as `generic-html`.
+- **Updating**: re-publish with the same title — both targets treat title as
+  identity and replace the file/page in place.
+- **Size**: warn over 10 MB; Confluence sites and GitHub enforce their own
+  hard limits. Suggest compressing embedded images.
+- **Don't guess identifiers**: space keys, base URLs, and repo owners must
+  come from the user or the environment — ask if missing.
+- **Building a deck from scratch** is out of scope: create a self-contained
+  reveal.js HTML file first (CDN assets only), then publish it.

@@ -1,19 +1,71 @@
-# html-presentation-wiki — HTML 프리젠테이션을 GitHub Wiki에 발행하는 Agent Skill
+# html-presentation-wiki — HTML 프리젠테이션을 Confluence/위키에 발행하는 Agent Skill
 
-HTML 프리젠테이션 파일(reveal.js, impress.js, Marp 등 단일 HTML 슬라이드 덱)을
-GitHub Wiki에 업로드하고, 클릭 한 번으로 볼 수 있는 위키 페이지와 인덱스를
-자동으로 만들어 주는 [Agent Skill](https://agentskills.io)입니다.
+HTML 프리젠테이션 파일(reveal.js, impress.js, Marp, deck.js, Shower 등 단일
+HTML 슬라이드 덱)을 **Confluence**(Cloud/Server/DC) 또는 **GitHub Wiki**에
+업로드하고, 페이지·첨부파일·인덱스를 자동으로 구성해 주는
+[Agent Skill](https://agentskills.io)입니다. 여러 파일 **배치 업로드**를
+지원합니다.
 
-## 동작 원리
+## Confluence에 발행 (기본 타깃)
 
-GitHub Wiki는 그 자체가 git 저장소(`<owner>/<repo>.wiki.git`)입니다. 하지만
-위키에 올린 `.html` 파일의 raw URL은 `text/plain`으로 서빙되어 브라우저에서
-렌더링되지 않습니다. 이 스킬은 다음과 같이 해결합니다.
+### 알아둘 핵심 사실
 
-1. HTML 파일을 위키 저장소의 `presentations/` 아래로 push
-2. 프리젠테이션별 위키 페이지 생성 — [htmlpreview.github.io](https://github.com/htmlpreview/htmlpreview.github.com)
-   / raw.githack.com 뷰어 링크(공개 리포), 다운로드 링크, 메타데이터 포함
-3. `Presentations` 인덱스 페이지 자동 갱신 (마커 기반, 최신순 정렬)
+- Confluence는 HTML 첨부파일을 보안상 **강제 다운로드**로 서빙합니다
+  (인라인 렌더링 안 됨). Cloud는 HTML 매크로 자체가 제거되었습니다.
+- 그래서 이 스킬의 발행 패턴은: **첨부파일 업로드 + 다운로드 링크와
+  메타데이터가 담긴 페이지 생성**입니다. 덱이 외부(GitHub Pages, S3 등)에도
+  호스팅되어 있다면 `--embed-url`로 **iframe 매크로 인라인 임베드**를
+  추가할 수 있습니다.
+
+### 인증 설정
+
+```bash
+export CONFLUENCE_BASE_URL="https://yoursite.atlassian.net/wiki"  # Cloud는 /wiki 포함
+export CONFLUENCE_EMAIL="you@example.com"
+export CONFLUENCE_API_TOKEN="..."   # https://id.atlassian.com → Security → API tokens
+# Server/Data Center는 대신:
+export CONFLUENCE_PAT="..."         # Personal Access Token
+```
+
+### 사용
+
+Claude Code에서 자연어로:
+
+> "덱 3개를 컨플루언스 DOCS 스페이스에 올려줘"
+
+또는 직접 실행:
+
+```bash
+# 계획만 미리보기 (API 호출 없음)
+python3 skills/html-presentation-wiki/scripts/publish_to_confluence.py \
+  deck1.html deck2.html --space DOCS --dry-run
+
+# 발행 — 파일마다 페이지 생성/업데이트 + 첨부 업로드
+python3 skills/html-presentation-wiki/scripts/publish_to_confluence.py \
+  deck1.html deck2.html --space DOCS
+
+# 단일 파일 + 외부 호스팅 URL 인라인 임베드
+python3 skills/html-presentation-wiki/scripts/publish_to_confluence.py \
+  deck.html --space DOCS --title "Q3 리뷰" \
+  --embed-url "https://you.github.io/repo/deck.html"
+```
+
+- 페이지들은 자동 생성되는 **"HTML Presentations"** 인덱스 페이지 아래에
+  중첩되고, 인덱스는 children 매크로로 스스로 유지됩니다.
+- **같은 제목으로 재발행하면 업데이트**(페이지 버전 증가, 첨부 교체)됩니다.
+- 주요 옵션: `--parent-title`/`--parent-id`(부모 지정), `--description`,
+  `--force`(로컬 참조 경고 무시), `--dry-run`.
+
+## GitHub Wiki에 발행 (보조 타깃)
+
+```bash
+bash skills/html-presentation-wiki/scripts/publish_to_wiki.sh \
+  --file deck.html --title "Q3 아키텍처 리뷰"
+```
+
+위키 git 저장소에 push하고 htmlpreview/raw.githack 뷰어 링크가 담긴 페이지와
+`Presentations` 인덱스를 생성합니다(공개 리포 전용 뷰어, 비공개는
+`--private`). 자세한 내용은 `references/github-wiki.md`.
 
 ## 설치
 
@@ -24,68 +76,54 @@ GitHub Wiki는 그 자체가 git 저장소(`<owner>/<repo>.wiki.git`)입니다. 
 /plugin install html-presentation-wiki@html-presentation-wiki-skill
 ```
 
-**수동 설치** — 스킬 폴더를 복사:
+**수동 설치**:
 
 ```bash
-# 개인 스킬 (모든 프로젝트에서 사용)
-cp -r skills/html-presentation-wiki ~/.claude/skills/
-
-# 또는 프로젝트 스킬 (해당 리포에서만)
-cp -r skills/html-presentation-wiki <your-repo>/.claude/skills/
+cp -r skills/html-presentation-wiki ~/.claude/skills/          # 개인 스킬
+cp -r skills/html-presentation-wiki <repo>/.claude/skills/     # 프로젝트 스킬
 ```
-
-## 사용법
-
-Claude Code에서 자연어로 요청하면 스킬이 자동으로 트리거됩니다:
-
-> "deck.html 프리젠테이션을 wiki에 올려줘"
-
-스크립트를 직접 실행할 수도 있습니다:
-
-```bash
-# 1) 업로드 전 검사 (프레임워크 감지, 로컬 파일 참조 확인 등)
-python3 skills/html-presentation-wiki/scripts/inspect_presentation.py deck.html
-
-# 2) 발행 (origin에서 리포 자동 감지)
-bash skills/html-presentation-wiki/scripts/publish_to_wiki.sh \
-  --file deck.html --title "Q3 아키텍처 리뷰" --description "한 줄 요약"
-```
-
-주요 옵션: `--repo owner/name`(리포 지정), `--private`(비공개 리포 — 뷰어 링크
-생략), `--page-name`(위키 페이지 이름 지정), `--force`(로컬 참조 경고 무시).
 
 ## 구조
 
 ```
 skills/html-presentation-wiki/
-├── SKILL.md                          # 스킬 본문 (에이전트용 지침)
+├── SKILL.md                          # 에이전트용 지침 (타깃 선택 → 검사 → 발행)
 ├── scripts/
-│   ├── inspect_presentation.py      # 프레임워크/제목/슬라이드 수/깨질 참조 검사
-│   ├── generate_wiki_page.py        # 위키 페이지 + 인덱스 생성
-│   └── publish_to_wiki.sh           # clone → 복사 → 생성 → commit → push(재시도)
+│   ├── inspect_presentation.py      # 프레임워크 감지(5종), 슬라이드 수,
+│   │                                #   업로드 시 깨질 로컬 참조 사전 검출
+│   ├── publish_to_confluence.py     # REST API: 페이지 생성/업데이트,
+│   │                                #   첨부 업로드/교체, 배치, dry-run
+│   ├── publish_to_wiki.sh           # GitHub Wiki: clone→발행→push(재시도)
+│   └── generate_wiki_page.py        # GitHub Wiki 페이지+인덱스 생성
 ├── references/
+│   ├── confluence.md                # Cloud/DC 차이, API, 트러블슈팅 표
 │   ├── github-wiki.md               # 위키 git 메커니즘, 트러블슈팅 표
-│   └── hosting-options.md           # 뷰어 프록시 vs GitHub Pages vs 타 위키
+│   └── hosting-options.md           # 인라인 뷰 전략 (GitHub Pages 등)
 └── assets/
-    └── page-template.md             # 위키 페이지 템플릿
+    └── page-template.md             # GitHub Wiki 페이지 템플릿
 ```
 
-## 알아둘 것
+## 지원하는 프리젠테이션 프레임워크
 
-- **위키 초기화**: 위키 git 저장소는 웹 UI에서 첫 페이지를 만든 뒤에야
-  생성됩니다. clone 실패 시 스크립트가 안내 메시지를 출력합니다.
-- **뷰어 링크는 공개 리포 전용**: 비공개 리포는 `--private`으로 다운로드 전용
-  페이지를 만들거나, GitHub Pages 호스팅을 권장합니다
-  (`references/hosting-options.md` 참고).
-- **자체 포함(self-contained) HTML 권장**: 로컬 파일(`./img/...`)을 참조하는
-  덱은 단일 파일 업로드 시 깨집니다. 검사 스크립트가 미리 잡아냅니다.
-- **업데이트**: 같은 제목으로 다시 발행하면 기존 파일과 페이지를 덮어씁니다.
+검사 스크립트가 자동 감지합니다 — 별도 옵션이 필요 없습니다:
+
+| 프레임워크 | 감지 방식 | 슬라이드 수 |
+|-----------|----------|------------|
+| reveal.js | `.reveal` 클래스 / `Reveal.initialize` | `<section>` 수 |
+| impress.js | `#impress` / `impress().init` | `.step` 수 |
+| Marp | marpit 마커 | `<section>` 수 |
+| deck.js / Shower | 컨테이너 클래스 | `.slide` 수 |
+| 그 외 | generic-html로 발행 (경고만 출력) | best-effort |
+
+단, **자체 포함(self-contained) HTML**이어야 합니다 — `./img/...` 같은 로컬
+파일 참조는 단일 파일 업로드 시 깨지므로 검사 단계에서 차단됩니다
+(CDN `https://` 참조는 괜찮습니다).
 
 ## 참고한 오픈소스
 
 - [anthropics/skills](https://github.com/anthropics/skills) — Agent Skills 스펙 및 skill-creator 모범 사례
 - [ryanbbrown/revealjs-skill](https://github.com/ryanbbrown/revealjs-skill) — 스킬/플러그인 배포 구조
-- [htmlpreview.github.com](https://github.com/htmlpreview/htmlpreview.github.com) — HTML 뷰어 프록시
+- [htmlpreview.github.com](https://github.com/htmlpreview/htmlpreview.github.com) — GitHub용 HTML 뷰어 프록시
 
 ## 라이선스
 
