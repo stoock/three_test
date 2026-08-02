@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "name": "hot-wheels-downhill",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Diecast gravity downhill racing game (three.js, real-scale physics)",
+  "scripts": {
+    "start": "python3 -m http.server 8000"
+  }
+}

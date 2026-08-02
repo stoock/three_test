@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Hot Wheels Downhill — Diecast Gravity Racing</title>
+<style>
+  :root {
+    --panel-bg: rgba(16, 20, 28, 0.88);
+    --panel-border: rgba(255, 255, 255, 0.10);
+    --accent: #ff6d00;
+    --accent2: #ffb300;
+    --text: #eef2f7;
+    --muted: #9aa7b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; }
+  body {
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    color: var(--text);
+    user-select: none;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  .panel {
+    position: absolute;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+  }
+  .hidden { display: none !important; }
+
+  /* ---------- setup panel ---------- */
+  #setupPanel {
+    left: 18px; top: 18px; bottom: 18px; width: 320px;
+    padding: 18px 18px 14px;
+    overflow-y: auto;
+  }
+  #setupPanel h1 {
+    font-size: 19px; letter-spacing: -0.5px; line-height: 1.25;
+    color: var(--accent2);
+  }
+  #setupPanel h1 small { display:block; font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 3px;}
+  .group { margin-top: 15px; }
+  .group > label.title { display:block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 7px; letter-spacing: 0.3px;}
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg button {
+    flex: 1 1 auto; min-width: 60px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 8px 6px; border-radius: 9px;
+    font-size: 12.5px; cursor: pointer;
+    transition: all .12s;
+    font-family: inherit;
+  }
+  .seg button:hover { background: rgba(255,255,255,0.12); }
+  .seg button.on {
+    background: var(--accent); border-color: var(--accent);
+    color: #fff; font-weight: 700;
+    box-shadow: 0 2px 10px rgba(255,109,0,0.45);
+  }
+  .seg button small { display:block; font-size: 10px; opacity: .75; font-weight: 400; margin-top: 2px;}
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .rowval { display:flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;}
+  .rowval b { color: var(--accent2); }
+  .swatches { display:flex; gap:8px; }
+  .swatches button { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+  .swatches button.on { border-color: #fff; transform: scale(1.12); }
+  #startBtn {
+    width: 100%; margin-top: 18px; padding: 13px;
+    font-size: 16px; font-weight: 800; letter-spacing: 1px;
+    background: linear-gradient(135deg, var(--accent), #ff3d00);
+    color: #fff; border: none; border-radius: 11px; cursor: pointer;
+    box-shadow: 0 4px 18px rgba(255,80,0,0.5);
+    font-family: inherit;
+  }
+  #startBtn:hover { filter: brightness(1.1); }
+  .physNote {
+    margin-top: 12px; padding: 10px 12px; border-radius: 9px;
+    background: rgba(255,179,0,0.08); border: 1px solid rgba(255,179,0,0.25);
+    font-size: 11px; line-height: 1.55; color: #ffd58a;
+  }
+
+  /* ---------- HUD ---------- */
+  #hud { left: 50%; transform: translateX(-50%); top: 16px; padding: 10px 22px; display: flex; gap: 26px; align-items: center; }
+  #hud .stat { text-align: center; }
+  #hud .stat .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; color: #fff; }
+  #hud .stat .l { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  #hud .stat .sub { font-size: 10px; color: var(--accent2); font-variant-numeric: tabular-nums; }
+  #progressWrap { position:absolute; left: 50%; transform: translateX(-50%); top: 86px; width: 380px; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden;}
+  #progressBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 4px; transition: width .1s linear; }
+
+  /* ---------- camera buttons ---------- */
+  #camBar { right: 18px; top: 18px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  #camBar button {
+    background: rgba(255,255,255,0.06); border: 1px solid var(--panel-border);
+    color: var(--text); padding: 7px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-family: inherit; text-align: left;
+  }
+  #camBar button.on { background: var(--accent); border-color: var(--accent); font-weight: 700; }
+
+  /* ---------- countdown ---------- */
+  #countdown {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    pointer-events: none; font-size: 130px; font-weight: 900; color: #fff;
+    text-shadow: 0 6px 40px rgba(255,109,0,0.9); letter-spacing: 4px;
+  }
+
+  /* ---------- toast (sector) ---------- */
+  #toast {
+    position: absolute; left: 50%; transform: translateX(-50%); top: 110px;
+    padding: 8px 18px; border-radius: 20px; background: rgba(0,0,0,0.6);
+    font-size: 13px; font-weight: 600; color: var(--accent2);
+    opacity: 0; transition: opacity .25s;
+    pointer-events: none;
+  }
+
+  /* ---------- results ---------- */
+  #resultsPanel {
+    left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 420px; padding: 24px;
+  }
+  #resultsPanel h2 { font-size: 22px; color: var(--accent2); margin-bottom: 4px; }
+  #resultsPanel .sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .resGrid { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;}
+  .resGrid .cell { background: rgba(255,255,255,0.05); border-radius: 9px; padding: 9px 12px; }
+  .resGrid .cell .l { font-size: 10px; color: var(--muted); }
+  .resGrid .cell .v { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .resGrid .cell .v small { font-size: 10px; color: var(--accent2); font-weight: 600;}
+  #splits { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.7;}
+  #splits b { color: var(--text); font-variant-numeric: tabular-nums;}
+  .btnRow { display: flex; gap: 8px; }
+  .btnRow button {
+    flex: 1; padding: 11px; border-radius: 9px; border: none; cursor: pointer;
+    font-size: 14px; font-weight: 700; font-family: inherit;
+  }
+  #replayBtn { background: var(--accent); color: #fff; }
+  #backToSetupBtn { background: rgba(255,255,255,0.1); color: var(--text); }
+
+  /* ---------- replay bar ---------- */
+  #replayBar {
+    left: 50%; transform: translateX(-50%); bottom: 18px;
+    width: min(860px, calc(100vw - 40px));
+    padding: 12px 16px;
+  }
+  #replayBar .row { display: flex; align-items: center; gap: 10px; }
+  #replayBar .row + .row { margin-top: 8px; }
+  #timeline { flex: 1; }
+  #replayBar button {
+    background: rgba(255,255,255,0.07); border: 1px solid var(--panel-border);
+    color: var(--text); padding: 6px 11px; border-radius: 8px; font-size: 12px;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  #replayBar button.on { background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  #playPauseBtn { font-size: 15px !important; width: 42px; }
+  #replayTime { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: center;}
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chips button { background: rgba(255,179,0,0.12) !important; border-color: rgba(255,179,0,0.35) !important; color: #ffd58a !important; }
+  .chips button:hover { background: rgba(255,179,0,0.28) !important; }
+  #exitReplayBtn { background: rgba(255,60,60,0.18) !important; border-color: rgba(255,90,90,0.4) !important; }
+  .badge { position: absolute; right: 16px; top: -14px; background: var(--accent); color:#fff; font-size: 11px; font-weight:800; padding: 4px 12px; border-radius: 12px; letter-spacing: 2px;}
+
+  #loading {
+    position: fixed; inset: 0; display:flex; align-items:center; justify-content:center;
+    background:#0b0e14; z-index: 99; font-size: 15px; color: var(--muted); letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="loading">트랙 디오라마 생성 중…</div>
+
+<!-- 설정 패널 -->
+<div id="setupPanel" class="panel">
+  <h1>🏁 HOT WHEELS DOWNHILL<small>다이캐스트 중력 레이싱 · 1:64 실물 스케일 물리</small></h1>
+
+  <div class="group">
+    <label class="title">날씨 (물리에 실제 반영)</label>
+    <div class="seg" id="weatherSeg">
+      <button data-v="clear" class="on">☀️ 맑음</button>
+      <button data-v="rain">🌧️ 비<small>저항↑ 벽마찰↓</small></button>
+      <button data-v="snow">❄️ 눈<small>저항↑↑ 실속 위험</small></button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="title">출발 레인 (레인별 실측 길이·곡률 차이)</label>
+    <div class="seg" id="laneSeg"></div>
+    <div class="hint">레인마다 실제 길이와 코너 곡률이 달라 기록이 달라집니다. 직접 찾아보세요.</div>
+  </div>
+
+  <div class="group">
+    <label class="title">차량 총중량</label>
+    <div class="rowval"><span>다이캐스트 + 웨이트</span><b id="weightVal">55 g</b></div>
+    <input type="range" id="weightSlider" min="30" max="120" value="55" step="1"/>
+    <div class="hint">무거울수록 공기저항·베어링 저항 대비 유리 (평지 런아웃 강함) — 실제 대회 튜닝과 동일.</div>
+  </div>
+
+  <div class="group">
+    <label class="title">휠 / 액슬</label>
+    <div class="seg" id="wheelSeg">
+      <button data-v="stock" class="on">순정<small>Crr 0.018</small></button>
+      <button data-v="fte">FTE 휠<small>Crr 0.011</small></button>
+      <button data-v="race">폴리싱+윤활<small>Crr 0.007</small></button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="title">무게 배분</label>
+    <div class="seg" id="distSeg">
+      <button data-v="front">앞쏠림<small>코너 불안정</small></button>
+      <button data-v="center" class="on">중앙·낮게<small>최적 안정</small></button>
+      <button data-v="rear">뒤쏠림<small>약간 불안정</small></button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="title">차체 형상</label>
+    <div class="seg" id="bodySeg">
+      <button data-v="streamline">스트림라인<small>CdA↓</small></button>
+      <button data-v="standard" class="on">스탠다드</button>
+      <button data-v="wide">와이드+윙<small>안정↑ CdA↑</small></button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="title">색상</label>
+    <div class="swatches" id="colorSeg"></div>
+  </div>
+
+  <button id="startBtn">🏁 출발 게이트로</button>
+
+  <div class="physNote">
+    ⚙️ 모든 수치는 SI 단위 실물 스케일(차 68mm / 트랙 27m / 낙차 2.5m, g=9.81)로 240Hz
+    고정 스텝 적분됩니다. 세팅·날씨가 바뀌면 기록은 물론 점프 성공 여부·완주 여부까지 달라집니다.
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="panel hidden">
+  <div class="stat"><div class="v" id="hudTime">0.00</div><div class="l">TIME (s)</div></div>
+  <div class="stat"><div class="v" id="hudSpeed">0.0</div><div class="l">km/h (실제)</div><div class="sub" id="hudScale">1:64 환산 0 km/h</div></div>
+  <div class="stat"><div class="v" id="hudDist">0.0</div><div class="l">주행 (m)</div></div>
+</div>
+<div id="progressWrap" class="hidden"><div id="progressBar"></div></div>
+
+<!-- 카메라 -->
+<div id="camBar" class="panel hidden">
+  <button data-v="broadcast" class="on">📺 중계 캠</button>
+  <button data-v="chase">🎥 체이스</button>
+  <button data-v="onboard">🚗 온보드</button>
+  <button data-v="free">🖱️ 자유</button>
+</div>
+
+<div id="countdown" class="hidden"></div>
+<div id="toast"></div>
+
+<!-- 결과 -->
+<div id="resultsPanel" class="panel hidden">
+  <h2 id="resTitle">🏆 FINISH!</h2>
+  <div class="sub" id="resSub"></div>
+  <div class="resGrid">
+    <div class="cell"><div class="l">기록</div><div class="v" id="resTime">–</div></div>
+    <div class="cell"><div class="l">최고 속도</div><div class="v" id="resTop">–</div></div>
+    <div class="cell"><div class="l">평균 속도</div><div class="v" id="resAvg">–</div></div>
+    <div class="cell"><div class="l">점프 비거리</div><div class="v" id="resJump">–</div></div>
+  </div>
+  <div id="splits"></div>
+  <div class="btnRow">
+    <button id="replayBtn">🎬 리플레이 보기</button>
+    <button id="backToSetupBtn">🔧 다시 세팅</button>
+  </div>
+</div>
+
+<!-- 리플레이 바 -->
+<div id="replayBar" class="panel hidden">
+  <div class="badge">REPLAY</div>
+  <div class="row">
+    <button id="playPauseBtn">⏸</button>
+    <input type="range" id="timeline" min="0" max="1000" value="0"/>
+    <span id="replayTime">0.00 / 0.00</span>
+  </div>
+  <div class="row">
+    <span style="font-size:11px;color:var(--muted)">배속</span>
+    <span class="seg" id="speedSeg" style="display:flex;gap:6px">
+      <button data-v="0.1">0.1×</button>
+      <button data-v="0.25">0.25×</button>
+      <button data-v="0.5">0.5×</button>
+      <button data-v="1" class="on">1×</button>
+      <button data-v="2">2×</button>
+    </span>
+    <span style="flex:1"></span>
+    <span class="chips" id="highlightChips"></span>
+    <button id="exitReplayBtn">✕ 종료</button>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
