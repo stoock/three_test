@@ -94,7 +94,7 @@ export class Environment {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     this.terrainGeo = geo;
     this.terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.95, metalness: 0,
+      vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.22,
     }));
     this.terrain.receiveShadow = true;
     this.scene.add(this.terrain);
@@ -125,8 +125,8 @@ export class Environment {
     const count = 140;
     const coneGeo = new THREE.ConeGeometry(0.10, 0.30, 7);
     const trunkGeo = new THREE.CylinderGeometry(0.014, 0.018, 0.09, 5);
-    this.coneMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.9 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.95 });
+    this.coneMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.9, envMapIntensity: 0.2 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.95, envMapIntensity: 0.2 });
     const cones = new THREE.InstancedMesh(coneGeo, this.coneMat, count);
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, count);
     cones.castShadow = true;

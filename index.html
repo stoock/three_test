@@ -165,6 +165,42 @@
   #exitReplayBtn { background: rgba(255,60,60,0.18) !important; border-color: rgba(255,90,90,0.4) !important; }
   .badge { position: absolute; right: 16px; top: -14px; background: var(--accent); color:#fff; font-size: 11px; font-weight:800; padding: 4px 12px; border-radius: 12px; letter-spacing: 2px;}
 
+  #rankBtn {
+    width: 100%; margin-top: 8px; padding: 9px;
+    font-size: 13px; font-weight: 700;
+    background: rgba(255,255,255,0.08); color: var(--text);
+    border: 1px solid var(--panel-border); border-radius: 10px; cursor: pointer;
+    font-family: inherit;
+  }
+  #rankBtn:hover { background: rgba(255,255,255,0.15); }
+  #resRank {
+    margin: -6px 0 12px; font-size: 13px; font-weight: 700; color: var(--accent2);
+  }
+  #resRankBtn { background: rgba(255,179,0,0.16); color: #ffd58a; }
+
+  #rankPanel {
+    left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 480px; max-height: 80vh; padding: 22px; overflow-y: auto; z-index: 10;
+  }
+  #rankPanel h2 { font-size: 20px; color: var(--accent2); margin-bottom: 4px; }
+  #rankPanel .sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+  #rankList { list-style: none; margin-bottom: 14px; }
+  #rankList li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 8px; margin-bottom: 4px;
+    background: rgba(255,255,255,0.04); font-size: 12.5px;
+  }
+  #rankList li.current {
+    background: rgba(255,109,0,0.18); border: 1px solid rgba(255,109,0,0.5);
+  }
+  #rankList li .pos { font-weight: 900; width: 26px; color: var(--accent2); font-size: 14px; }
+  #rankList li .time { font-weight: 800; font-variant-numeric: tabular-nums; width: 64px; }
+  #rankList li .cfg { flex: 1; color: var(--muted); font-size: 11px; line-height: 1.4; }
+  #rankList li .date { font-size: 10px; color: var(--muted); }
+  #rankList .empty { color: var(--muted); font-size: 12px; padding: 14px; text-align: center; }
+  #rankClearBtn { background: rgba(255,60,60,0.15); color: #ff9d9d; }
+  #rankCloseBtn { background: rgba(255,255,255,0.1); color: var(--text); }
+
   #loading {
     position: fixed; inset: 0; display:flex; align-items:center; justify-content:center;
     background:#0b0e14; z-index: 99; font-size: 15px; color: var(--muted); letter-spacing: 1px;
@@ -189,7 +225,15 @@
   </div>
 
   <div class="group">
-    <label class="title">출발 레인 (레인별 실측 길이·곡률 차이)</label>
+    <label class="title">트랙 스타일</label>
+    <div class="seg" id="styleSeg">
+      <button data-v="classic" class="on">🟠 클래식 트랙<small>4레인 오렌지</small></button>
+      <button data-v="road">🛣️ 마운틴 로드<small>아스팔트·방호벽</small></button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="title">출발 레인 / 주행 라인 (실측 길이·곡률 차이)</label>
     <div class="seg" id="laneSeg"></div>
     <div class="hint">레인마다 실제 길이와 코너 곡률이 달라 기록이 달라집니다. 직접 찾아보세요.</div>
   </div>
@@ -229,11 +273,21 @@
   </div>
 
   <div class="group">
+    <label class="title">페인팅 (다이캐스트 리버리)</label>
+    <div class="seg" id="liverySeg">
+      <button data-v="solid">솔리드</button>
+      <button data-v="stripe">스트라이프</button>
+      <button data-v="number" class="on">스트라이프+넘버</button>
+    </div>
+  </div>
+
+  <div class="group">
     <label class="title">색상</label>
     <div class="swatches" id="colorSeg"></div>
   </div>
 
   <button id="startBtn">🏁 출발 게이트로</button>
+  <button id="rankBtn">🏆 랭킹 보기</button>
 
   <div class="physNote">
     ⚙️ 모든 수치는 SI 단위 실물 스케일(차 68mm / 트랙 27m / 낙차 2.5m, g=9.81)로 240Hz
@@ -264,6 +318,7 @@
 <div id="resultsPanel" class="panel hidden">
   <h2 id="resTitle">🏆 FINISH!</h2>
   <div class="sub" id="resSub"></div>
+  <div id="resRank"></div>
   <div class="resGrid">
     <div class="cell"><div class="l">기록</div><div class="v" id="resTime">–</div></div>
     <div class="cell"><div class="l">최고 속도</div><div class="v" id="resTop">–</div></div>
@@ -273,7 +328,19 @@
   <div id="splits"></div>
   <div class="btnRow">
     <button id="replayBtn">🎬 리플레이 보기</button>
+    <button id="resRankBtn">🏆 랭킹</button>
     <button id="backToSetupBtn">🔧 다시 세팅</button>
+  </div>
+</div>
+
+<!-- 랭킹 -->
+<div id="rankPanel" class="panel hidden">
+  <h2>🏆 랭킹</h2>
+  <div class="sub">완주 기록 상위 10 — 이 브라우저에 저장됩니다</div>
+  <ol id="rankList"></ol>
+  <div class="btnRow">
+    <button id="rankClearBtn">🗑 기록 초기화</button>
+    <button id="rankCloseBtn">닫기</button>
   </div>
 </div>
 
@@ -304,7 +371,8 @@
 {
   "imports": {
     "three": "./vendor/three.module.js",
-    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js",
+    "three/addons/environments/RoomEnvironment.js": "./vendor/RoomEnvironment.js"
   }
 }
 </script>

@@ -38,6 +38,7 @@ export class UI {
     CAR_COLORS.forEach((c, i) => {
       const b = document.createElement('button');
       b.style.background = '#' + c.toString(16).padStart(6, '0');
+      b.dataset.c = String(c);
       if (i === 0) b.classList.add('on');
       b.addEventListener('click', () => {
         colorSeg.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
@@ -48,10 +49,12 @@ export class UI {
     });
 
     bindSeg($('weatherSeg'), (v) => callbacks.onConfig('weather', v));
+    bindSeg($('styleSeg'), (v) => callbacks.onConfig('style', v));
     bindSeg(laneSeg, (v) => callbacks.onConfig('lane', parseInt(v, 10)));
     bindSeg($('wheelSeg'), (v) => callbacks.onConfig('wheel', v));
     bindSeg($('distSeg'), (v) => callbacks.onConfig('dist', v));
     bindSeg($('bodySeg'), (v) => callbacks.onConfig('body', v));
+    bindSeg($('liverySeg'), (v) => callbacks.onConfig('livery', v));
 
     const ws = $('weightSlider');
     ws.addEventListener('input', () => {
@@ -63,6 +66,10 @@ export class UI {
     $('replayBtn').addEventListener('click', () => callbacks.onEnterReplay());
     $('backToSetupBtn').addEventListener('click', () => callbacks.onBackToSetup());
     $('exitReplayBtn').addEventListener('click', () => callbacks.onExitReplay());
+    $('rankBtn').addEventListener('click', () => callbacks.onShowRankings());
+    $('resRankBtn').addEventListener('click', () => callbacks.onShowRankings());
+    $('rankCloseBtn').addEventListener('click', () => $('rankPanel').classList.add('hidden'));
+    $('rankClearBtn').addEventListener('click', () => callbacks.onClearRankings());
 
     bindSeg($('camBar'), (v) => callbacks.onCamera(v));
     document.addEventListener('keydown', (e) => {
@@ -85,6 +92,47 @@ export class UI {
   }
 
   hideLoading() { this.els.loading.style.display = 'none'; }
+
+  // 저장된 설정을 컨트롤 상태에 반영
+  applyConfig(cfg) {
+    const setSeg = (id, val) => {
+      document.querySelectorAll(`#${id} button`).forEach((b) =>
+        b.classList.toggle('on', b.dataset.v === String(val)));
+    };
+    setSeg('weatherSeg', cfg.weather);
+    setSeg('styleSeg', cfg.style);
+    setSeg('laneSeg', cfg.lane);
+    setSeg('wheelSeg', cfg.wheel);
+    setSeg('distSeg', cfg.dist);
+    setSeg('bodySeg', cfg.body);
+    setSeg('liverySeg', cfg.livery);
+    const ws = $('weightSlider');
+    ws.value = String(cfg.massG);
+    $('weightVal').textContent = cfg.massG + ' g';
+    document.querySelectorAll('#colorSeg button').forEach((b) =>
+      b.classList.toggle('on', b.dataset.c === String(cfg.color)));
+  }
+
+  showRankings(list, currentDate) {
+    const panel = $('rankPanel');
+    panel.classList.remove('hidden');
+    const ol = $('rankList');
+    if (!list.length) {
+      ol.innerHTML = '<div class="empty">아직 완주 기록이 없습니다. 첫 레이스를 달려보세요!</div>';
+      return;
+    }
+    ol.innerHTML = '';
+    list.slice(0, 10).forEach((r, i) => {
+      const li = document.createElement('li');
+      if (r.date === currentDate) li.classList.add('current');
+      const d = new Date(r.date);
+      li.innerHTML = `<span class="pos">${i + 1}</span>`
+        + `<span class="time">${r.t.toFixed(3)}s</span>`
+        + `<span class="cfg">${r.cfg}</span>`
+        + `<span class="date">${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}</span>`;
+      ol.appendChild(li);
+    });
+  }
 
   setCamButton(v) {
     this.els.camBar.querySelectorAll('button').forEach((b) =>
@@ -136,6 +184,8 @@ export class UI {
     this.els.results.classList.remove('hidden');
     $('resTitle').textContent = res.dnf ? '💤 완주 실패 (DNF)' : '🏆 FINISH!';
     $('resSub').textContent = res.sub;
+    $('resRank').textContent = res.dnf || !res.rank ? ''
+      : (res.rank === 1 ? '🥇 신기록! ' : '') + `전체 랭킹 ${res.rank}위 / ${res.rankTotal}개 기록`;
     $('resTime').textContent = res.dnf ? '–' : res.time.toFixed(3) + ' s';
     $('resTop').innerHTML = `${(res.topV * 3.6).toFixed(1)} km/h <small>(1:64 환산 ${(res.topV * 3.6 * 64).toFixed(0)})</small>`;
     $('resAvg').textContent = res.dnf ? '–' : (res.avgV * 3.6).toFixed(1) + ' km/h';

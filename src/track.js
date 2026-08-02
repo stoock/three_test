@@ -172,42 +172,92 @@ export class Track {
     return smp;
   }
 
-  // 차량 트랜스폼 계산 (라이브/리플레이 공용) — alt: 트랙면 위 높이(점프), roll/pitch 연출 포함
-  placeCar(obj, laneIdx, s, alt, v, airPitch) {
-    const smp = this.lanePoint(laneIdx, s, obj.userData.hint || (obj.userData.hint = { idx: 0 }),
-      _pos, _fwd);
-    _right.set(_fwd.z, 0, -_fwd.x).normalize();
-    _up.crossVectors(_fwd, _right).normalize();
-    if (_up.y < 0) { _up.negate(); _right.negate(); }
+  // 차량 트랜스폼 계산 (라이브/리플레이 공용)
+  // opts: { airborne, vy(월드 수직속도), snap(스무딩 없이 즉시 배치) }
+  // 접지 시 트랙 접선을 따르고, 비행 중엔 속도 벡터 자세(탄도 궤적) — 쿼터니언 슬럽으로
+  // 발사/착지 순간의 급격한 자세 스냅을 흡수한다.
+  placeCar(obj, laneIdx, s, alt, v, opts = {}) {
+    const ud = obj.userData;
+    const smp = this.lanePoint(laneIdx, s, ud.hint || (ud.hint = { idx: 0 }), _pos, _fwd);
     _pos.addScaledVector(UP, alt);
     obj.position.copy(_pos);
-    // 롤: 코너 원심력 연출(작게), 피치: 비행 중 기수 변화
-    const roll = Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012));
-    _m.makeBasis(_right, _up, _fwd);
-    obj.quaternion.setFromRotationMatrix(_m);
-    if (roll) obj.rotateZ(roll);
-    if (airPitch) obj.rotateX(-airPitch);
+
+    if (opts.airborne) {
+      // 수평 전방 + 탄도 피치 (트랙 경사를 따르지 않는다)
+      _fwd.y = 0; _fwd.normalize();
+      _right.set(_fwd.z, 0, -_fwd.x).normalize();
+      _up.set(0, 1, 0);
+      _m.makeBasis(_right, _up, _fwd);
+      _q.setFromRotationMatrix(_m);
+      const pitch = Math.max(-0.55, Math.min(0.4,
+        Math.atan2(opts.vy ?? 0, Math.max(0.4, v))));
+      _q2.setFromAxisAngle(_X, -pitch);
+      _q.multiply(_q2);
+    } else {
+      _right.set(_fwd.z, 0, -_fwd.x).normalize();
+      _up.crossVectors(_fwd, _right).normalize();
+      if (_up.y < 0) { _up.negate(); _right.negate(); }
+      _m.makeBasis(_right, _up, _fwd);
+      _q.setFromRotationMatrix(_m);
+      const roll = Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012));
+      if (roll) { _q2.setFromAxisAngle(_Z, roll); _q.multiply(_q2); }
+    }
+
+    if (opts.snap || !ud.hasQ) {
+      obj.quaternion.copy(_q);
+      ud.hasQ = true;
+    } else {
+      obj.quaternion.slerp(_q, 0.22);
+    }
     return smp;
   }
 
   /* ---------------- 메시 생성 ---------------- */
 
-  buildMesh(scene, terrainHeightFn) {
+  buildMesh(scene, terrainHeightFn, style = 'classic') {
+    this.style = style;
+    if (this.meshGroup) {
+      scene.remove(this.meshGroup);
+      this.meshGroup.traverse((o) => {
+        if (o.isMesh) {
+          o.geometry.dispose();
+          if (o.material.map) o.material.map.dispose();
+          o.material.dispose();
+        }
+      });
+    }
     const group = new THREE.Group();
 
-    // 단면 프로파일 (lateral, height) — 4레인 데크 + 측벽 + 디바이더 + 바닥
-    const prof = [];
-    prof.push([-HALF_W, WALL_H], [-HALF_W + WALL_T, WALL_H], [-HALF_W + WALL_T, 0]);
-    const bounds = [-LANE_WIDTH, 0, LANE_WIDTH];
-    for (const b of bounds) {
-      prof.push([b - 0.0035, 0], [b - 0.0035, DIV_H], [b + 0.0035, DIV_H], [b + 0.0035, 0]);
+    // 단면 프로파일 (lateral, height)
+    let prof;
+    if (style === 'road') {
+      // 마운틴 로드: 아스팔트 노면 + 양측 콘크리트 방호벽 (디바이더 없음)
+      prof = [
+        [-HALF_W, 0.020], [-HALF_W + 0.007, 0.020], [-HALF_W + 0.007, 0],
+        [HALF_W - 0.007, 0], [HALF_W - 0.007, 0.020], [HALF_W, 0.020],
+        [HALF_W, -0.016], [-HALF_W, -0.016],
+      ];
+      this.trackMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 0.92, metalness: 0.02, side: THREE.DoubleSide, envMapIntensity: 0.3,
+      });
+    } else {
+      // 클래식: 4레인 오렌지 트랙 + 측벽 + 디바이더
+      prof = [];
+      prof.push([-HALF_W, WALL_H], [-HALF_W + WALL_T, WALL_H], [-HALF_W + WALL_T, 0]);
+      for (const b of [-LANE_WIDTH, 0, LANE_WIDTH]) {
+        prof.push([b - 0.0035, 0], [b - 0.0035, DIV_H], [b + 0.0035, DIV_H], [b + 0.0035, 0]);
+      }
+      prof.push([HALF_W - WALL_T, 0], [HALF_W - WALL_T, WALL_H], [HALF_W, WALL_H]);
+      prof.push([HALF_W, -0.016], [-HALF_W, -0.016]);
+      this.trackMat = new THREE.MeshStandardMaterial({
+        color: 0xff6d00, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide, envMapIntensity: 0.35,
+      });
     }
-    prof.push([HALF_W - WALL_T, 0], [HALF_W - WALL_T, WALL_H], [HALF_W, WALL_H]);
-    prof.push([HALF_W, -0.016], [-HALF_W, -0.016]); // 바닥면
 
     const step = 3; // 샘플 3개당 1링
     const rings = [];
     for (let i = 0; i <= N_SAMPLES; i += step) rings.push(i);
+    this._rings = rings;
     const P = prof.length;
     const positions = new Float32Array(rings.length * P * 3);
     const indices = [];
@@ -235,16 +285,34 @@ export class Track {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setIndex(indices);
     geo.computeVertexNormals();
-    this.trackMat = new THREE.MeshStandardMaterial({
-      color: 0xff6d00, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide,
-    });
+    if (style === 'road') {
+      // 프로파일 포인트별 색: 방호벽=콘크리트, 노면=아스팔트, 하부=어두운 회색
+      const ptColor = (j) => (j <= 1 || j === 4 || j === 5) ? [0.66, 0.68, 0.71]
+        : (j === 2 || j === 3) ? [0.115, 0.12, 0.135] : [0.09, 0.085, 0.08];
+      const colors = new Float32Array(rings.length * P * 3);
+      for (let r = 0; r < rings.length; r++) {
+        for (let j = 0; j < P; j++) {
+          const [cr, cg, cb] = ptColor(j);
+          const idx = (r * P + j) * 3;
+          colors[idx] = cr; colors[idx + 1] = cg; colors[idx + 2] = cb;
+        }
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    }
     const mesh = new THREE.Mesh(geo, this.trackMat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
 
+    if (style === 'road') {
+      // 중앙 황색 점선 + 양측 백색 실선
+      group.add(this._buildLine(0, 0.0045, 0.0012, 0xd9a733, 5));
+      group.add(this._buildLine(-(HALF_W - 0.011), 0.003, 0.0012, 0xc9ced2, 0));
+      group.add(this._buildLine(HALF_W - 0.011, 0.003, 0.0012, 0xc9ced2, 0));
+    }
+
     // 지지 기둥
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x8a6d4a, roughness: 0.9 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x8a6d4a, roughness: 0.9, envMapIntensity: 0.2 });
     const postGeo = new THREE.CylinderGeometry(0.014, 0.017, 1, 8);
     for (let i = 30; i < N_SAMPLES; i += 55) {
       const c = this.center.pos[i];
@@ -264,6 +332,39 @@ export class Track {
     scene.add(group);
     this.meshGroup = group;
     return group;
+  }
+
+  // 노면 위 라인 리본 — dashPeriod > 0 이면 점선
+  _buildLine(lat, width, yOff, colorHex, dashPeriod) {
+    const rings = this._rings;
+    const positions = [];
+    const indices = [];
+    let vi = 0;
+    for (let r = 0; r < rings.length - 1; r++) {
+      if (dashPeriod > 0 && Math.floor(r / dashPeriod) % 2 === 1) continue;
+      for (const rr of [r, r + 1]) {
+        const i = rings[rr];
+        const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
+        _up.crossVectors(fwd, right).normalize();
+        if (_up.y < 0) _up.negate();
+        for (const side of [-1, 1]) {
+          const l = lat + side * width / 2;
+          positions.push(
+            c.x + right.x * l + _up.x * yOff,
+            c.y + right.y * l + _up.y * yOff,
+            c.z + right.z * l + _up.z * yOff);
+        }
+      }
+      indices.push(vi, vi + 1, vi + 3, vi, vi + 3, vi + 2);
+      vi += 4;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: colorHex, roughness: 0.8, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.3,
+    }));
   }
 
   _buildGate() {
@@ -351,8 +452,13 @@ export class Track {
 
   setWet(wet) {
     if (!this.trackMat) return;
-    this.trackMat.roughness = wet ? 0.25 : 0.55;
-    this.trackMat.color.set(wet ? 0xd85c00 : 0xff6d00);
+    if (this.style === 'road') {
+      this.trackMat.roughness = wet ? 0.45 : 0.92;
+      this.trackMat.color.setScalar(wet ? 0.7 : 1);
+    } else {
+      this.trackMat.roughness = wet ? 0.25 : 0.55;
+      this.trackMat.color.set(wet ? 0xd85c00 : 0xff6d00);
+    }
   }
 }
 
@@ -361,3 +467,7 @@ const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _X = new THREE.Vector3(1, 0, 0);
+const _Z = new THREE.Vector3(0, 0, 1);

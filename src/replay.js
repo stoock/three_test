@@ -4,9 +4,10 @@ export const REC_HZ = 120;
 export class Recorder {
   constructor() { this.frames = []; }
   clear() { this.frames = []; }
-  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact]
+  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact, vy(월드 수직속도)]
   push(t, car) {
-    this.frames.push([t, car.s, car.v, car.alt, car.scrub, car.airborne ? 1 : 0, car.landedImpact]);
+    this.frames.push([t, car.s, car.v, car.alt, car.scrub, car.airborne ? 1 : 0,
+      car.landedImpact, car.airborne ? car.vy : 0]);
   }
   get duration() { return this.frames.length ? this.frames[this.frames.length - 1][0] : 0; }
 
@@ -87,12 +88,10 @@ export class Player {
   }
   _mk(a, b, f) {
     const lerp = (x, y) => x + (y - x) * f;
-    // 비행 피치 추정용 수직속도: alt 변화율
-    const dtF = Math.max(1e-9, b[0] - a[0]);
-    const vy = dtF > 1e-8 ? (b[3] - a[3]) / dtF : 0;
     return {
       s: lerp(a[1], b[1]), v: lerp(a[2], b[2]), alt: lerp(a[3], b[3]),
-      scrub: lerp(a[4], b[4]), airborne: a[5] > 0 || b[5] > 0, vy,
+      scrub: lerp(a[4], b[4]), airborne: a[5] > 0 || b[5] > 0,
+      vy: lerp(a[7] ?? 0, b[7] ?? 0),
     };
   }
 }

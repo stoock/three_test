@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Track } from './track.js';
 import { Environment } from './environment.js';
 import { CarSim, PHYS_DT, WEATHERS, WHEEL_TYPES, WEIGHT_DIST, BODY_TYPES } from './physics.js';
@@ -19,23 +20,48 @@ renderer.toneMappingExposure = 1.1;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+// 금속 페인트 반사용 환경맵 (다이캐스트 광택)
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+}
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 120);
 camera.position.set(-2.5, 3.6, -2.5);
 
 const track = new Track();
 const env = new Environment(scene, track);
-track.buildMesh(scene, (x, z) => env.heightAt(x, z));
+const heightFn = (x, z) => env.heightAt(x, z);
 const broadcastCams = track.buildBroadcastCams();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enabled = false;
 
-/* ---------------- 상태 ---------------- */
+/* ---------------- 상태 (설정은 localStorage에 저장/복원) ---------------- */
 const config = {
   weather: 'clear', lane: 1, massG: 55, wheel: 'stock',
-  dist: 'center', body: 'standard', color: CAR_COLORS[0], seed: 12345,
+  dist: 'center', body: 'standard', color: CAR_COLORS[0],
+  livery: 'number', style: 'classic', seed: 12345,
 };
+const CFG_KEYS = ['weather', 'lane', 'massG', 'wheel', 'dist', 'body', 'color', 'livery', 'style'];
+try {
+  const saved = JSON.parse(localStorage.getItem('hwd_config') || 'null');
+  if (saved) for (const k of CFG_KEYS) if (k in saved) config[k] = saved[k];
+} catch { /* 무시 */ }
+function saveConfig() {
+  const out = {};
+  for (const k of CFG_KEYS) out[k] = config[k];
+  try { localStorage.setItem('hwd_config', JSON.stringify(out)); } catch { /* 무시 */ }
+}
+
+/* ---------------- 랭킹 (localStorage) ---------------- */
+function loadRanks() {
+  try { return JSON.parse(localStorage.getItem('hwd_ranks') || '[]'); } catch { return []; }
+}
+function saveRanks(r) {
+  try { localStorage.setItem('hwd_ranks', JSON.stringify(r)); } catch { /* 무시 */ }
+}
+let lastRankDate = 0;
 
 let state = 'setup'; // setup | countdown | race | finished | replay
 let car = null;        // { sim, model }
@@ -81,17 +107,20 @@ function rebuildCar() {
     scene.remove(car.model.group);
     car.model.group.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
   }
-  const model = buildCar({ color: config.color, body: config.body, wheel: config.wheel });
+  const model = buildCar({
+    color: config.color, body: config.body, wheel: config.wheel,
+    livery: config.livery, massG: config.massG, dist: config.dist,
+  });
   scene.add(model.group);
   const sim = new CarSim(track, { ...config });
   car = { sim, model };
-  placeCarLive();
+  placeCarLive(true);
 }
 
-function placeCarLive() {
+function placeCarLive(snap = false) {
   const { sim, model } = car;
-  const pitch = sim.airborne ? Math.max(-0.5, Math.min(0.5, Math.atan2(sim.vy, Math.max(0.5, sim.vh)))) : 0;
-  track.placeCar(model.group, sim.cfg.lane, sim.s, sim.alt, sim.v, pitch);
+  track.placeCar(model.group, sim.cfg.lane, sim.s, sim.alt, sim.v,
+    { airborne: sim.airborne, vy: sim.vy, snap });
   updateBlob(sim.cfg.lane, sim.s, sim.alt);
 }
 
@@ -105,7 +134,12 @@ function updateBlob(lane, s, alt) {
 const ui = new UI(track, {
   onConfig(key, val) {
     config[key] = val;
+    saveConfig();
     if (key === 'weather') env.setWeather(val);
+    if (key === 'style') {
+      track.buildMesh(scene, heightFn, val);
+      track.setWet(config.weather === 'rain');
+    }
     if (state === 'setup') rebuildCar();
   },
   onStart() {
@@ -151,6 +185,13 @@ const ui = new UI(track, {
     player.seek(Math.max(0, h.t - 0.7));
     if (h.slow) { player.speed = 0.25; ui.setReplaySpeedButton(0.25); }
     player.playing = true;
+  },
+  onShowRankings() {
+    ui.showRankings(loadRanks(), lastRankDate);
+  },
+  onClearRankings() {
+    saveRanks([]);
+    ui.showRankings([], 0);
   },
 });
 
@@ -251,6 +292,24 @@ function endRace() {
     sub: `${emoji} ${w.label} · ${config.lane + 1}레인 · ${config.massG}g · ${wt.label} · ${d.label} 배분 · ${b.label}`
       + (dnf ? ' — 저항을 이기지 못하고 트랙 위에서 멈췄습니다' : ''),
   };
+
+  // 랭킹 등록 (완주 시)
+  if (!dnf) {
+    const styleLabel = config.style === 'road' ? '마운틴 로드' : '클래식';
+    const entry = {
+      t: finishTime, date: Date.now(),
+      cfg: `${emoji} ${config.lane + 1}레인 · ${config.massG}g · ${wt.label} · ${b.label} · ${styleLabel}`,
+    };
+    const ranks = loadRanks();
+    ranks.push(entry);
+    ranks.sort((a, b2) => a.t - b2.t);
+    if (ranks.length > 30) ranks.length = 30;
+    saveRanks(ranks);
+    lastRankDate = entry.date;
+    const idx = ranks.findIndex((r) => r.date === entry.date && r.t === entry.t);
+    raceResult.rank = idx >= 0 ? idx + 1 : 0;
+    raceResult.rankTotal = ranks.length;
+  }
 }
 
 /* ---------------- 카메라 ---------------- */
@@ -262,12 +321,15 @@ function updateCamera(dt) {
   const carPos = car ? car.model.group.position : new THREE.Vector3(0, 2.6, 0);
 
   if (state === 'setup') {
-    idleAngle += dt * 0.12;
-    const cx = 2.2 + Math.cos(idleAngle) * 4.5;
-    const cz = 6.5 + Math.sin(idleAngle) * 5.5;
-    const cy = 2.6 + Math.sin(idleAngle * 0.5) * 0.8;
-    camera.position.lerp(new THREE.Vector3(cx, cy, cz), 0.02);
-    _camTarget.lerp(new THREE.Vector3(1.8, 1.0, 6.0), 0.03);
+    // 게이트의 차량 클로즈업 궤도 — 세팅 변경점(리버리/휠/웨이트/차체)이 바로 보인다
+    idleAngle += dt * 0.4;
+    const r = 0.21;
+    const desired = new THREE.Vector3(
+      carPos.x + Math.cos(idleAngle) * r,
+      carPos.y + 0.075 + Math.sin(idleAngle * 0.7) * 0.03,
+      carPos.z + Math.sin(idleAngle) * r);
+    camera.position.lerp(desired, 0.08);
+    _camTarget.lerp(new THREE.Vector3(carPos.x, carPos.y + 0.012, carPos.z), 0.15);
     camera.lookAt(_camTarget);
     return;
   }
@@ -345,8 +407,8 @@ function animate() {
   } else if (state === 'replay' && player) {
     const smp = player.tick(dt);
     if (smp) {
-      const pitch = smp.airborne ? Math.max(-0.5, Math.min(0.5, Math.atan2(smp.vy, Math.max(0.5, smp.v)))) : 0;
-      track.placeCar(car.model.group, config.lane, smp.s, smp.alt, smp.v, pitch);
+      track.placeCar(car.model.group, config.lane, smp.s, smp.alt, smp.v,
+        { airborne: smp.airborne, vy: smp.vy });
       updateBlob(config.lane, smp.s, smp.alt);
       car.model.spinWheels(smp.v, dt * player.speed);
       car.model.applySquash(999, 0);
@@ -366,7 +428,9 @@ window.addEventListener('resize', () => {
 });
 
 /* ---------------- 시작 ---------------- */
-env.setWeather('clear');
+track.buildMesh(scene, heightFn, config.style);
+env.setWeather(config.weather);
+ui.applyConfig(config);
 rebuildCar();
 ui.showSetup();
 ui.hideLoading();
