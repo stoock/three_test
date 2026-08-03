@@ -46,6 +46,11 @@ export class CarSim {
     this.mass = cfg.massG / 1000;
     // 휠 회전 관성 → 유효질량 (작지만 실존하는 항)
     this.massEff = this.mass + 0.0024;
+    // 차폭 절반 (와이드 바디는 더 넓음) → 벽까지 남는 횡방향 여유 결정
+    this.halfCarW = cfg.body === 'wide' ? 0.017 : 0.015;
+    this.latLimit = track.lateralLimit
+      ? track.lateralLimit(cfg.lane, this.halfCarW)
+      : { min: -0.0055, max: 0.0055 };
     this.reset();
   }
 
@@ -56,7 +61,16 @@ export class CarSim {
     this.vy = 0;          // 비행 중 수직 속도
     this.airborne = false;
     this.airStartS = 0;
-    this.scrub = 0;       // 이번 스텝 벽 스크럽 감속량 (하이라이트용)
+    this.scrub = 0;       // 이번 스텝 벽 스크럽 감속량 (하이라이트/사운드용)
+    // 횡방향 상태 — 핸들이 없으므로 코너에서 원심력에 밀려 벽 쪽으로 이동한다
+    // 로드 코스에서는 출발 위치(도로를 가로지르는 좌우 위치)가 곧 초기 lat이 된다.
+    this.lat = this.cfg.startLat || 0;   // 기준선 대비 횡 오프셋 (m, +는 진행방향 오른쪽)
+    this.latV = 0;        // 횡 속도 (m/s)
+    this.wallContact = 0; // 이번 스텝 벽 접촉 세기 (0이면 비접촉)
+    this.wallHit = 0;     // 이번 스텝 벽에 새로 부딪힌 충격 (사운드용)
+    this.latDemand = 0;   // 타이어 그립을 넘어 벽·옆차로 전달되는 횡력 (per-mass)
+    this.latOutward = 1;  // 원심력이 미는 방향 (+1 = 오른쪽)
+    this.rubScrub = 0;    // 옆차와 비비며 생기는 추가 감속 (외부에서 주입)
     this.finished = false;
     this.stopped = false;
     this.hint = { idx: 0 };
@@ -92,21 +106,20 @@ export class CarSim {
         res += this.wheel.crr * this.weather.crrMul * N;                     // 구름저항
         res += (this.wheel.bearing * this.weather.bearingMul) / this.mass;   // 베어링(질량 무관 힘)
         res += (0.5 * RHO * this.body.cda * this.weather.dragMul * this.v * this.v) / this.mass; // 항력
-        // 코너 벽 스크럽: 필요 횡가속 > 그립 한계 → 잉여분을 벽 마찰로 감속
-        const latReq = this.v * this.v * Math.abs(smp.kh);
-        const grip = this.weather.muLat * N;
-        if (latReq > grip) {
-          this.scrub = this.weather.wallMu * (latReq - grip) * this.body.stability * this.dist.scrub;
-          res += this.scrub;
-        } else this.scrub = 0;
-      } else this.scrub = 0;
+        res += this._lateral(smp, N, dt);                                    // 벽 스크럽 (횡방향 동역학)
+      } else {
+        this.scrub = 0; this.wallContact = 0; this.wallHit = 0;
+        this.latV *= Math.exp(-6 * dt);
+      }
 
       // 노면 요철/돌풍 노이즈 (시드 결정론)
       const jit = (this.rng() - 0.5) * 2 * this.weather.jitter;
 
       this.v += (a - res + (this.v > 0.05 ? jit : 0)) * (this.mass / this.massEff) * dt;
       if (this.v < 0) this.v = 0;
-      this.s += this.v * dt;
+      // 코너 안쪽 라인은 짧고 바깥 라인은 길다. 차가 실제로 그린 라인만큼만 기준선 진도가
+      // 나가도록 보정한다 (kh>0이면 곡률 중심이 오른쪽 → +lat이 안쪽 = 짧은 경로).
+      this.s += this.v * dt * (1 - this.lat * smp.kh);
       this.alt = 0;
     } else {
       // 탄도 비행: 중력 + 공기저항만 (구름저항 없음 → 점프가 빠른 이유)
@@ -114,11 +127,14 @@ export class CarSim {
       this.vh = Math.max(0.1, this.vh - dragA * dt);
       this.vy -= G * dt;
       // 수평 속도 유지한 채 트랙 호 길이 기준으로 전진
-      const dsArc = (this.vh / cos) * dt;
+      const dsArc = (this.vh / cos) * dt * (1 - this.lat * smp.kh);
       this.s += dsArc;
       const smp2 = t.laneSample(lane, this.s, this.hint);
       // 상대 고도 = (월드 수직 이동) − (트랙면 수직 변화)
       this.alt += this.vy * dt - smp2.dyds * dsArc;
+      // 공중에서는 횡방향으로도 관성대로 계속 날아간다 (그립 없음)
+      this.lat = Math.max(this.latLimit.min, Math.min(this.latLimit.max, this.lat + this.latV * dt));
+      this.scrub = 0; this.wallContact = 0; this.wallHit = 0;
       if (this.alt <= 0 && this.vy < 0) {
         // 착지: 수직 충격에 비례한 손실 + 전진속도 재구성
         const cos2 = Math.sqrt(Math.max(0.05, 1 - smp2.dyds * smp2.dyds));
@@ -131,6 +147,51 @@ export class CarSim {
         this.airborne = false;
       }
     }
+  }
+
+  // 횡방향 동역학 — 조향이 없는 다이캐스트 카의 실제 거동.
+  // 코너에서 원심력이 타이어 횡그립을 넘으면 차는 바깥으로 미끄러져 벽(또는 레인 디바이더)에
+  // 붙고, 그때부터 벽이 부족한 구심력을 대신 받쳐준다. 그 수직항력에 비례한 마찰이
+  // 종방향 감속(스크럽)이 된다 → 벽에 닿아 있을 때만 스크럽이 발생한다.
+  // 반환값: 종방향 감속량 (per-mass, m/s²)
+  _lateral(smp, N, dt) {
+    const v2k = this.v * this.v * smp.kh;      // 곡률에 필요한 구심 가속
+    const outward = -Math.sign(smp.kh || 1);   // 원심력이 미는 방향 (+1 = 오른쪽)
+    const need = Math.abs(v2k);
+    const grip = this.weather.muLat * N;
+    const lim = this.latLimit;
+
+    // 타이어가 감당하고 남는 몫만큼 차체가 바깥으로 밀려난다
+    this.latDemand = Math.max(0, need - grip);   // 벽·옆차로 전달되는 초과 횡력 (per-mass)
+    this.latOutward = outward;
+    const slipA = this.latDemand * outward;
+    this.latV += slipA * dt;
+    // 그립 범위 안이면 횡속도는 마찰로 잦아든다
+    if (need <= grip) this.latV *= Math.exp(-8 * dt);
+    this.lat += this.latV * dt;
+
+    this.wallHit = 0;
+    let wallN = 0;
+    if (this.lat >= lim.max || this.lat <= lim.min) {
+      const atMax = this.lat >= lim.max;
+      this.lat = atMax ? lim.max : lim.min;
+      // 벽에 부딪히는 순간의 충격 (사운드/연출용)
+      if ((atMax && this.latV > 0) || (!atMax && this.latV < 0)) {
+        this.wallHit = Math.abs(this.latV);
+        this.latV = -this.latV * 0.18;         // 약한 반발 (플라스틱/금속 접촉)
+      }
+      // 벽이 받쳐주는 수직항력 = 타이어가 못 낸 구심력 (바깥으로 밀 때만)
+      const pushingIntoWall = (atMax && outward > 0) || (!atMax && outward < 0);
+      if (pushingIntoWall) wallN = Math.max(0, need - grip);
+    }
+
+    this.wallContact = wallN;
+    // 벽 마찰 + 옆차와 비비는 마찰 (후자는 접촉 해석에서 주입된다)
+    this.scrub = (wallN > 0
+      ? this.weather.wallMu * wallN * this.body.stability * this.dist.scrub
+      : 0) + this.rubScrub;
+    this.rubScrub = 0;
+    return this.scrub;
   }
 
   get airDistance() { return this.airborne ? this.s - this.airStartS : 0; }

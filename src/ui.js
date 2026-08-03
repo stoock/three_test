@@ -1,4 +1,5 @@
 import { CAR_COLORS } from './carmodel.js';
+import { LANE_COUNT } from './track.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,15 +25,16 @@ export class UI {
       loading: $('loading'),
     };
 
-    // 레인 버튼 (레인별 실측 길이 표시)
+    // 레인 버튼 (클래식은 레인별 실측 길이, 로드는 도로상의 출발 위치)
+    this.track = track;
     const laneSeg = $('laneSeg');
-    track.lanes.forEach((lane, i) => {
+    for (let i = 0; i < LANE_COUNT; i++) {
       const b = document.createElement('button');
       b.dataset.v = String(i);
-      b.innerHTML = `${i + 1}레인<small>${lane.total.toFixed(2)}m</small>`;
       if (i === 1) b.classList.add('on');
       laneSeg.appendChild(b);
-    });
+    }
+    this.setLaneMode('classic');
 
     // 색상 스와치
     const colorSeg = $('colorSeg');
@@ -75,7 +77,15 @@ export class UI {
     $('rankCloseBtn').addEventListener('click', () => $('rankPanel').classList.add('hidden'));
     $('rankClearBtn').addEventListener('click', () => callbacks.onClearRankings());
 
-    bindSeg($('camBar'), (v) => callbacks.onCamera(v));
+    // 카메라 버튼 (사운드 토글은 별도 처리)
+    $('camBar').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn || btn.id === 'soundBtn' || !btn.dataset.v) return;
+      $('camBar').querySelectorAll('button[data-v]').forEach((b) => b.classList.remove('on'));
+      btn.classList.add('on');
+      callbacks.onCamera(btn.dataset.v);
+    });
+    $('soundBtn').addEventListener('click', () => callbacks.onToggleSound());
     document.addEventListener('keydown', (e) => {
       const map = { 1: 'broadcast', 2: 'chase', 3: 'onboard', 4: 'free' };
       if (map[e.key]) {
@@ -118,6 +128,22 @@ export class UI {
     $('weightVal').textContent = cfg.massG + ' g';
     document.querySelectorAll('#colorSeg button').forEach((b) =>
       b.classList.toggle('on', b.dataset.c === String(cfg.color)));
+  }
+
+  // 트랙 스타일에 따라 레인 버튼의 의미가 달라진다
+  setLaneMode(style) {
+    const road = style === 'road';
+    const roadLabels = ['왼쪽 끝', '왼쪽 안', '오른쪽 안', '오른쪽 끝'];
+    document.querySelectorAll('#laneSeg button').forEach((b, i) => {
+      b.innerHTML = road
+        ? `${i + 1}번 위치<small>${roadLabels[i]}</small>`
+        : `${i + 1}레인<small>${this.track.lanes[i].total.toFixed(2)}m</small>`;
+    });
+    $('laneTitle').textContent = road ? '출발 위치 (도로 위 좌우 위치)' : '출발 레인 (레인별 실측 길이·곡률)';
+    $('laneHint').textContent = road
+      ? '로드 코스는 칸막이가 없어 레인이 곧 경로가 아닙니다. 출발 위치만 다를 뿐, 코너에서는 '
+        + '모두 바깥으로 밀려 같은 라인으로 몰리고 서로 부딪힙니다. 이동 거리는 실제로 그린 라인이 결정합니다.'
+      : '디바이더가 레인을 갈라놓기 때문에 레인별 실제 길이와 곡률 차이가 그대로 기록 차이가 됩니다.';
   }
 
   setRivalGroupVisible(on) {
@@ -187,8 +213,14 @@ export class UI {
   }
 
   setCamButton(v) {
-    this.els.camBar.querySelectorAll('button').forEach((b) =>
+    this.els.camBar.querySelectorAll('button[data-v]').forEach((b) =>
       b.classList.toggle('on', b.dataset.v === v));
+  }
+
+  setSoundButton(on) {
+    const b = $('soundBtn');
+    b.textContent = on ? '🔊 소리 켬' : '🔇 소리 끔';
+    b.classList.toggle('on', on);
   }
 
   showSetup() {
@@ -259,9 +291,10 @@ export class UI {
     $('resTop').innerHTML = `${(res.topV * 3.6).toFixed(1)} km/h <small>(1:64 환산 ${(res.topV * 3.6 * 64).toFixed(0)})</small>`;
     $('resAvg').textContent = res.dnf ? '–' : (res.avgV * 3.6).toFixed(1) + ' km/h';
     $('resJump').textContent = res.jumpDist > 0.15 ? res.jumpDist.toFixed(2) + ' m' : '없음';
-    $('splits').innerHTML = res.splits.length
+    $('splits').innerHTML = (res.splits.length
       ? '구간기록 — ' + res.splits.map((s, i) => `CP${i + 1} <b>${s.toFixed(2)}s</b>`).join(' · ')
-      : '';
+      : '')
+      + (res.contacts ? `<br>💥 차대차 접촉 <b id="resContacts">${res.contacts}</b>회` : '');
   }
 
   showReplay(duration, highlights) {

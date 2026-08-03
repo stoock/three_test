@@ -15,10 +15,11 @@ export class Recorder {
   // 하위 호환: 단일 차량 접근
   get frames() { return this.tracks[0]; }
 
-  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact, vy(월드 수직속도)]
+  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact, vy, lat, latV, wallContact]
   push(t, car, trackIdx = 0) {
     this.tracks[trackIdx].push([t, car.s, car.v, car.alt, car.scrub,
-      car.airborne ? 1 : 0, car.landedImpact, car.airborne ? car.vy : 0]);
+      car.airborne ? 1 : 0, car.landedImpact, car.airborne ? car.vy : 0,
+      car.lat, car.latV, car.wallContact]);
   }
   get duration() {
     let d = 0;
@@ -151,6 +152,9 @@ export class Player {
       s: lerp(a[1], b[1]), v: lerp(a[2], b[2]), alt: lerp(a[3], b[3]),
       scrub: lerp(a[4], b[4]), airborne: a[5] > 0 || b[5] > 0,
       vy: lerp(a[7] ?? 0, b[7] ?? 0),
+      lat: lerp(a[8] ?? 0, b[8] ?? 0), latV: lerp(a[9] ?? 0, b[9] ?? 0),
+      wallContact: lerp(a[10] ?? 0, b[10] ?? 0),
+      impact: Math.max(a[6] ?? 0, b[6] ?? 0),
     };
   }
 }

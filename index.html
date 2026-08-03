@@ -268,9 +268,9 @@
   </div>
 
   <div class="group">
-    <label class="title">출발 레인 / 주행 라인 (실측 길이·곡률 차이)</label>
+    <label class="title" id="laneTitle">출발 레인</label>
     <div class="seg" id="laneSeg"></div>
-    <div class="hint">레인마다 실제 길이와 코너 곡률이 달라 기록이 달라집니다. 직접 찾아보세요.</div>
+    <div class="hint" id="laneHint"></div>
   </div>
 
   <div class="group hidden" id="rivalGroup">
@@ -360,6 +360,7 @@
   <button data-v="chase">🎥 체이스</button>
   <button data-v="onboard">🚗 온보드</button>
   <button data-v="free">🖱️ 자유</button>
+  <button id="soundBtn" style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.1)">🔊 소리 켬</button>
 </div>
 
 <div id="countdown" class="hidden"></div>

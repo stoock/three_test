@@ -82,8 +82,11 @@ export class Track {
 
   _buildLanes() {
     this.lanes = [];
-    for (let l = 0; l < LANE_COUNT; l++) {
-      const offset = (l - (LANE_COUNT - 1) / 2) * LANE_WIDTH;
+    // 0..LANE_COUNT-1 = 클래식 트랙의 물리적 레인(디바이더로 분리됨)
+    // LANE_COUNT = 마운틴 로드용 중앙선 기준 단일 주행로 — 로드에서는 레인이 칸막이가 아니라
+    // 출발 위치일 뿐이므로, 모든 차가 같은 기준선 위에서 자기 라인을 그린다.
+    for (let l = 0; l <= LANE_COUNT; l++) {
+      const offset = l === LANE_COUNT ? 0 : (l - (LANE_COUNT - 1) / 2) * LANE_WIDTH;
       const pts = this.center.pos.map((p, i) =>
         p.clone().addScaledVector(this.center.right[i], offset)
       );
@@ -144,6 +147,20 @@ export class Track {
     return lo;
   }
 
+  // 차량이 레인 중앙 기준으로 움직일 수 있는 횡방향 범위 (m).
+  // 클래식: 레인 디바이더 사이 = 좁음 / 마운틴 로드: 방호벽 사이 노면 전체 = 넓음.
+  // 핸들이 없는 다이캐스트 카는 이 범위 끝(벽·디바이더)에 밀려 붙어 긁으며 코너를 돈다.
+  lateralLimit(laneIdx, halfCarW = 0.016) {
+    if (this.style === 'road' || laneIdx === LANE_COUNT) {
+      const inner = HALF_W - 0.007;         // 방호벽 안쪽 면까지의 거리
+      const off = this.lanes[laneIdx].offset;
+      return { min: -inner - off + halfCarW, max: inner - off - halfCarW };
+    }
+    // 클래식: 자기 레인 폭 안에서만 (디바이더 반폭 0.0035)
+    const half = Math.max(0.002, LANE_WIDTH / 2 - 0.0035 - halfCarW);
+    return { min: -half, max: half };
+  }
+
   // s(호 길이) → 샘플 보간. hint 인덱스로 순차 탐색 가속.
   laneSample(laneIdx, s, hintObj) {
     const lane = this.lanes[laneIdx];
@@ -180,6 +197,11 @@ export class Track {
     const ud = obj.userData;
     const smp = this.lanePoint(laneIdx, s, ud.hint || (ud.hint = { idx: 0 }), _pos, _fwd);
     _pos.addScaledVector(UP, alt);
+    // 횡 오프셋 (코너에서 벽으로 밀린 위치)
+    if (opts.lat) {
+      _right.set(_fwd.z, 0, -_fwd.x).normalize();
+      _pos.addScaledVector(_right, opts.lat);
+    }
     obj.position.copy(_pos);
 
     if (opts.airborne) {
@@ -201,6 +223,9 @@ export class Track {
       _q.setFromRotationMatrix(_m);
       const roll = Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012));
       if (roll) { _q2.setFromAxisAngle(_Z, roll); _q.multiply(_q2); }
+      // 옆으로 미끄러지는 만큼 차체가 비스듬히 틀어진다 (벽을 긁을 때의 그 자세)
+      const yaw = Math.max(-0.28, Math.min(0.28, Math.atan2(opts.latV || 0, Math.max(0.5, v))));
+      if (yaw) { _q2.setFromAxisAngle(_Y, -yaw); _q.multiply(_q2); }
     }
 
     if (opts.snap || !ud.hasQ) {
@@ -470,4 +495,5 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _X = new THREE.Vector3(1, 0, 0);
+const _Y = new THREE.Vector3(0, 1, 0);
 const _Z = new THREE.Vector3(0, 0, 1);
