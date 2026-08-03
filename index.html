@@ -95,6 +95,14 @@
   #hud .stat .sub { font-size: 10px; color: var(--accent2); font-variant-numeric: tabular-nums; }
   #progressWrap { position:absolute; left: 50%; transform: translateX(-50%); top: 86px; width: 380px; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden;}
   #progressBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 4px; transition: width .1s linear; }
+  #progressRival, #progressGhost {
+    position: absolute; top: 0; width: 3px; height: 100%; border-radius: 2px;
+    transition: left .1s linear;
+  }
+  #progressRival { background: #4fc3f7; box-shadow: 0 0 6px #4fc3f7; }
+  #progressGhost { background: #e0e0e0; box-shadow: 0 0 6px rgba(255,255,255,0.8); }
+  #hudGap .ahead { color: #66bb6a; }
+  #hudGap .behind { color: #ef5350; }
 
   /* ---------- camera buttons ---------- */
   #camBar { right: 18px; top: 18px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
@@ -177,6 +185,16 @@
     margin: -6px 0 12px; font-size: 13px; font-weight: 700; color: var(--accent2);
   }
   #resRankBtn { background: rgba(255,179,0,0.16); color: #ffd58a; }
+  #resVersus {
+    margin: 0 0 12px; padding: 10px 12px; border-radius: 9px;
+    background: rgba(255,255,255,0.05); font-size: 12.5px; line-height: 1.7;
+  }
+  #resVersus:empty { display: none; }
+  #resVersus .win { color: #66bb6a; font-weight: 800; }
+  #resVersus .lose { color: #ef5350; font-weight: 800; }
+  #resVersus .row { display: flex; justify-content: space-between; gap: 10px; }
+  #resVersus .row b { font-variant-numeric: tabular-nums; }
+  #resVersus .who { color: var(--muted); }
 
   #rankPanel {
     left: 50%; top: 50%; transform: translate(-50%,-50%);
@@ -225,6 +243,23 @@
   </div>
 
   <div class="group">
+    <label class="title">경기 방식</label>
+    <div class="seg" id="modeSeg">
+      <button data-v="solo" class="on">🚗 1대 타임어택</button>
+      <button data-v="duel">🚗🚙 2대 대결<small>라이벌 자동 생성</small></button>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="title">고스트 카 (내 1위 기록)</label>
+    <div class="seg" id="ghostSeg">
+      <button data-v="off" class="on">끄기</button>
+      <button data-v="on">👻 고스트와 달리기</button>
+    </div>
+    <div class="hint" id="ghostHint"></div>
+  </div>
+
+  <div class="group">
     <label class="title">트랙 스타일</label>
     <div class="seg" id="styleSeg">
       <button data-v="classic" class="on">🟠 클래식 트랙<small>4레인 오렌지</small></button>
@@ -236,6 +271,17 @@
     <label class="title">출발 레인 / 주행 라인 (실측 길이·곡률 차이)</label>
     <div class="seg" id="laneSeg"></div>
     <div class="hint">레인마다 실제 길이와 코너 곡률이 달라 기록이 달라집니다. 직접 찾아보세요.</div>
+  </div>
+
+  <div class="group hidden" id="rivalGroup">
+    <label class="title">🚙 라이벌 세팅 (2대 대결)</label>
+    <div class="seg" id="rivalPresetSeg">
+      <button data-v="mirror" class="on">동일 스펙<small>레인만 다름</small></button>
+      <button data-v="heavy">헤비 튜너<small>110g·폴리싱</small></button>
+      <button data-v="light">라이트 스트림<small>38g·스트림라인</small></button>
+      <button data-v="stock">순정 챌린저<small>45g·순정휠</small></button>
+    </div>
+    <div class="hint" id="rivalHint"></div>
   </div>
 
   <div class="group">
@@ -300,8 +346,13 @@
   <div class="stat"><div class="v" id="hudTime">0.00</div><div class="l">TIME (s)</div></div>
   <div class="stat"><div class="v" id="hudSpeed">0.0</div><div class="l">km/h (실제)</div><div class="sub" id="hudScale">1:64 환산 0 km/h</div></div>
   <div class="stat"><div class="v" id="hudDist">0.0</div><div class="l">주행 (m)</div></div>
+  <div class="stat hidden" id="hudGapStat"><div class="v" id="hudGap">–</div><div class="l" id="hudGapLabel">GAP (m)</div></div>
 </div>
-<div id="progressWrap" class="hidden"><div id="progressBar"></div></div>
+<div id="progressWrap" class="hidden">
+  <div id="progressBar"></div>
+  <div id="progressRival" class="hidden"></div>
+  <div id="progressGhost" class="hidden"></div>
+</div>
 
 <!-- 카메라 -->
 <div id="camBar" class="panel hidden">
@@ -319,6 +370,7 @@
   <h2 id="resTitle">🏆 FINISH!</h2>
   <div class="sub" id="resSub"></div>
   <div id="resRank"></div>
+  <div id="resVersus"></div>
   <div class="resGrid">
     <div class="cell"><div class="l">기록</div><div class="v" id="resTime">–</div></div>
     <div class="cell"><div class="l">최고 속도</div><div class="v" id="resTop">–</div></div>

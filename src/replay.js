@@ -1,19 +1,51 @@
 // 물리 프레임 기록 → 보간 재생 + 하이라이트 자동 추출
+// 다차량 대응: Recorder는 트랙(=차량)별 프레임 배열을 갖는다.
 export const REC_HZ = 120;
 
 export class Recorder {
-  constructor() { this.frames = []; }
-  clear() { this.frames = []; }
-  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact, vy(월드 수직속도)]
-  push(t, car) {
-    this.frames.push([t, car.s, car.v, car.alt, car.scrub, car.airborne ? 1 : 0,
-      car.landedImpact, car.airborne ? car.vy : 0]);
+  constructor(trackCount = 1) {
+    this.tracks = Array.from({ length: trackCount }, () => []);
+    this.meta = Array.from({ length: trackCount }, () => ({}));
   }
-  get duration() { return this.frames.length ? this.frames[this.frames.length - 1][0] : 0; }
+  clear(trackCount = this.tracks.length) {
+    this.tracks = Array.from({ length: trackCount }, () => []);
+    this.meta = Array.from({ length: trackCount }, () => ({}));
+  }
+  get count() { return this.tracks.length; }
+  // 하위 호환: 단일 차량 접근
+  get frames() { return this.tracks[0]; }
 
-  // 하이라이트 자동 추출
-  analyze(finishTime) {
-    const F = this.frames;
+  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact, vy(월드 수직속도)]
+  push(t, car, trackIdx = 0) {
+    this.tracks[trackIdx].push([t, car.s, car.v, car.alt, car.scrub,
+      car.airborne ? 1 : 0, car.landedImpact, car.airborne ? car.vy : 0]);
+  }
+  get duration() {
+    let d = 0;
+    for (const f of this.tracks) if (f.length) d = Math.max(d, f[f.length - 1][0]);
+    return d;
+  }
+
+  // 고스트 저장용 직렬화 (프레임을 4프레임마다 솎아 용량 절감)
+  serializeTrack(trackIdx = 0, stride = 4) {
+    const F = this.tracks[trackIdx];
+    const out = [];
+    for (let i = 0; i < F.length; i += stride) {
+      out.push(F[i].map((x) => Math.round(x * 1e4) / 1e4));
+    }
+    if (F.length && (F.length - 1) % stride !== 0) out.push(F[F.length - 1]);
+    return out;
+  }
+  static fromFrames(frames) {
+    const r = new Recorder(1);
+    r.tracks[0] = frames;
+    return r;
+  }
+
+  // 하이라이트 자동 추출 (기준 차량 = trackIdx)
+  // overtakeUntil: 이 시각 이후(=선두가 이미 피니시한 뒤 런아웃)의 순위 변동은 무시
+  analyze(finishTime, trackIdx = 0, overtakeUntil = Infinity) {
+    const F = this.tracks[trackIdx];
     if (!F.length) return [];
     const hl = [{ t: 0, label: '🚦 출발', slow: false }];
 
@@ -35,7 +67,7 @@ export class Recorder {
       }
     }
 
-    // 코너 최대 공방 (스크럽 피크, 1초 윈도우 국소 최대 상위 2개)
+    // 코너 최대 공방 (스크럽 피크, 국소 최대 상위 2개)
     const peaks = [];
     for (let i = 2; i < F.length - 2; i++) {
       const sc = F[i][4];
@@ -50,6 +82,31 @@ export class Recorder {
     }
     used.sort((a, b) => a - b);
     used.forEach((p, k) => hl.push({ t: F[p][0], label: `🔥 코너 공방 ${k + 1}`, slow: true }));
+
+    // 2대 이상: 순위 역전 순간 — 레인 길이가 다르므로 진행률(s/finishS)로 비교
+    if (this.tracks.length > 1) {
+      const G = this.tracks[1];
+      const n = Math.min(F.length, G.length);
+      const fA = this.meta[trackIdx]?.finishS || 1;
+      const fB = this.meta[1]?.finishS || 1;
+      let prevLead = null;
+      for (let i = 0; i < n; i++) {
+        if (F[i][0] > overtakeUntil) break;
+        const gap = F[i][1] / fA - G[i][1] / fB;
+        if (Math.abs(gap) < 0.002) continue;
+        const lead = gap > 0 ? 0 : 1;
+        if (prevLead !== null && lead !== prevLead) {
+          const last = hl.find((h) => h.overtake && Math.abs(h.t - F[i][0]) < 1.0);
+          if (!last) {
+            hl.push({
+              t: F[i][0], overtake: true, slow: true,
+              label: lead === 0 ? '⚡ 역전 (내 차)' : '⚡ 역전 (상대)',
+            });
+          }
+        }
+        prevLead = lead;
+      }
+    }
 
     if (finishTime != null) hl.push({ t: finishTime, label: '🏁 피니시', slow: true });
     hl.sort((a, b) => a.t - b.t);
@@ -72,19 +129,21 @@ export class Player {
     }
     return this.sample(this.t);
   }
-  // t → 보간된 차량 상태
-  sample(t) {
-    const F = this.rec.frames;
-    if (!F.length) return null;
+  // t → 보간된 차량 상태 (기본: 0번 차량)
+  sample(t, trackIdx = 0) {
+    const F = this.rec.tracks[trackIdx];
+    if (!F || !F.length) return null;
     if (t <= F[0][0]) return this._mk(F[0], F[0], 0);
     if (t >= F[F.length - 1][0]) { const f = F[F.length - 1]; return this._mk(f, f, 0); }
-    // 균일 간격이므로 인덱스 직산
     let i = Math.min(F.length - 2, Math.max(0, Math.floor(t * REC_HZ)));
     while (i > 0 && F[i][0] > t) i--;
     while (i < F.length - 2 && F[i + 1][0] < t) i++;
     const a = F[i], b = F[i + 1];
     const f = (t - a[0]) / Math.max(1e-9, b[0] - a[0]);
     return this._mk(a, b, f);
+  }
+  sampleAll(t) {
+    return this.rec.tracks.map((_, i) => this.sample(t, i));
   }
   _mk(a, b, f) {
     const lerp = (x, y) => x + (y - x) * f;
