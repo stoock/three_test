@@ -8,6 +8,12 @@
 
 const NOISE_SECONDS = 2;
 
+// WebAudio는 AudioParam에 NaN/Infinity가 한 번이라도 들어가면 그 노드가 영구히 무음이 된다.
+// 실시간 물리값을 그대로 넘기므로 항상 유한값으로 잘라서 쓴다.
+function fin(x, fallback = 0, lo = -1e6, hi = 1e6) {
+  return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : fallback;
+}
+
 export class RaceAudio {
   constructor() {
     this.ctx = null;
@@ -217,23 +223,23 @@ export class RaceAudio {
     const v = this.voices.get(id);
     if (!v || !this.ready) return;
     const t = this.ctx.currentTime;
-    const rate = this.rate;
-    const speed = Math.max(0, st.v);
+    const rate = fin(this.rate, 1, 0.01, 8);
+    const speed = Math.max(0, fin(st.v, 0, 0, 100));
 
     // 거리 감쇠 (1:64 스케일이므로 수십 cm 단위에서 급격히 줄어든다)
-    const d = Math.max(0.12, st.dist ?? 1);
+    const d = Math.max(0.12, fin(st.dist, 1, 0.12, 1e4));
     let dist = Math.min(1, 0.45 / d);
     if (v.ghost) dist *= 0.35;                  // 고스트는 옅게
-    v.out.gain.setTargetAtTime(dist, t, 0.05);
-    if (v.pan) v.pan.pan.setTargetAtTime(Math.max(-1, Math.min(1, st.panX ?? 0)), t, 0.08);
+    v.out.gain.setTargetAtTime(fin(dist, 0, 0, 1), t, 0.05);
+    if (v.pan) v.pan.pan.setTargetAtTime(fin(st.panX, 0, -1, 1), t, 0.08);
 
     if (st.airborne) {
       // 공중: 구름 소리가 뚝 끊기고 바람만 남는다 (실제 점프의 그 정적)
       v.rollGain.gain.setTargetAtTime(0, t, 0.03);
       v.bodyGain.gain.setTargetAtTime(0, t, 0.03);
       v.scrubGain.gain.setTargetAtTime(0, t, 0.03);
-      v.windGain.gain.setTargetAtTime(Math.min(0.16, speed * 0.02), t, 0.06);
-      v.windBP.frequency.setTargetAtTime((500 + speed * 90) * rate, t, 0.06);
+      v.windGain.gain.setTargetAtTime(fin(Math.min(0.16, speed * 0.02), 0, 0, 1), t, 0.06);
+      v.windBP.frequency.setTargetAtTime(fin((500 + speed * 90) * rate, 500, 20, 20000), t, 0.06);
       return;
     }
     v.windGain.gain.setTargetAtTime(0, t, 0.08);
@@ -242,26 +248,27 @@ export class RaceAudio {
     const road = this.style === 'road';
     const wheelBright = v.wheel === 'race' ? 1.25 : v.wheel === 'fte' ? 1.1 : 1.0;
     const base = road ? 240 : 380;              // 아스팔트는 더 낮고 거칠게
-    v.rollBP.frequency.setTargetAtTime((base + speed * 210 * wheelBright) * rate, t, 0.05);
+    v.rollBP.frequency.setTargetAtTime(fin((base + speed * 210 * wheelBright) * rate, base, 20, 20000), t, 0.05);
     v.rollBP.Q.value = road ? 0.5 : 1.1;        // 플라스틱 트랙은 좁고 통이 울리는 소리
-    v.rollLP.frequency.setTargetAtTime((1600 + speed * 460) * rate, t, 0.06);
+    v.rollLP.frequency.setTargetAtTime(fin((1600 + speed * 460) * rate, 1600, 20, 20000), t, 0.06);
 
     // 젖은 노면은 쉭 하는 성분이 더해지고, 눈은 먹먹해진다
     const wetBoost = this.weather === 'rain' ? 1.25 : this.weather === 'snow' ? 0.8 : 1.0;
     const rollLevel = Math.min(0.5, Math.pow(speed, 1.15) * 0.055) * wetBoost;
-    v.rollGain.gain.setTargetAtTime(speed > 0.05 ? rollLevel : 0, t, 0.04);
+    v.rollGain.gain.setTargetAtTime(fin(speed > 0.05 ? rollLevel : 0, 0, 0, 1), t, 0.04);
 
     // 저역 몸통 — 무거울수록 크고 낮게 (100g 넘는 커스텀은 "두두두" 하고 굴러간다)
     const heavy = Math.min(1, Math.max(0, (v.massG - 30) / 90));
-    v.bodyOsc.frequency.setTargetAtTime(Math.max(24, (26 + speed * 7.5)) * rate, t, 0.05);
+    v.bodyOsc.frequency.setTargetAtTime(fin(Math.max(24, 26 + speed * 7.5) * rate, 26, 8, 8000), t, 0.05);
     v.bodyGain.gain.setTargetAtTime(
-      speed > 0.2 ? Math.min(0.10, speed * 0.007 * (0.35 + heavy)) : 0, t, 0.05);
+      fin(speed > 0.2 ? Math.min(0.10, speed * 0.007 * (0.35 + heavy)) : 0, 0, 0, 1), t, 0.05);
 
     // 벽 스크럽 — 접촉 세기에 비례한 금속 마찰음
-    const sc = Math.max(st.scrub ?? 0, (st.wallContact ?? 0) * 0.35);
+    const sc = Math.max(fin(st.scrub, 0, 0, 1e4), fin(st.wallContact, 0, 0, 1e4) * 0.35);
     if (sc > 0.02) {
-      v.scrubGain.gain.setTargetAtTime(Math.min(0.30, 0.02 + sc * 0.030), t, 0.02);
-      v.scrubBP.frequency.setTargetAtTime((2300 + Math.min(4200, sc * 220) + speed * 55) * rate, t, 0.03);
+      v.scrubGain.gain.setTargetAtTime(fin(Math.min(0.30, 0.02 + sc * 0.030), 0, 0, 1), t, 0.02);
+      v.scrubBP.frequency.setTargetAtTime(
+        fin((2300 + Math.min(4200, sc * 220) + speed * 55) * rate, 2300, 20, 20000), t, 0.03);
     } else {
       v.scrubGain.gain.setTargetAtTime(0, t, 0.05);
     }
@@ -275,7 +282,7 @@ export class RaceAudio {
     const f = ctx.createBiquadFilter();
     f.type = type; f.frequency.value = freq; f.Q.value = q;
     const g = ctx.createGain();
-    const amp = gain * Math.min(1, 0.5 / Math.max(0.12, dist));
+    const amp = fin(gain * Math.min(1, 0.5 / Math.max(0.12, fin(dist, 1, 0.12, 1e4))), 0.05, 0.0001, 1);
     g.gain.setValueAtTime(amp, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(f); f.connect(g); g.connect(this.masterGain); g.connect(this.reverb);

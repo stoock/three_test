@@ -294,33 +294,34 @@
     <label class="title">차량 총중량</label>
     <div class="rowval"><span>다이캐스트 + 웨이트</span><b id="weightVal">55 g</b></div>
     <input type="range" id="weightSlider" min="30" max="120" value="55" step="1"/>
-    <div class="hint">무거울수록 공기저항·베어링 저항 대비 유리 (평지 런아웃 강함) — 실제 대회 튜닝과 동일.</div>
+    <div class="hint">무거울수록 저항 대비 유리하지만, <b>78g을 넘으면 액슬이 휘어 휠이 쓸리고</b>
+      착지 충격도 커집니다. 최적은 대략 <b>75~90g</b> — 노면이 미끄러울수록 더 가볍게.</div>
   </div>
 
   <div class="group">
-    <label class="title">휠 / 액슬</label>
+    <label class="title">휠 / 액슬 — 잘 구를수록 옆으로도 미끄러진다</label>
     <div class="seg" id="wheelSeg">
-      <button data-v="stock" class="on">순정<small>Crr 0.018</small></button>
-      <button data-v="fte">FTE 휠<small>Crr 0.011</small></button>
-      <button data-v="race">폴리싱+윤활<small>Crr 0.007</small></button>
+      <button data-v="stock" class="on">순정<small>Crr .018 · 그립 100%</small></button>
+      <button data-v="fte">FTE 휠<small>Crr .011 · 그립 84%</small></button>
+      <button data-v="race">폴리싱+윤활<small>Crr .007 · 그립 70%</small></button>
     </div>
   </div>
 
   <div class="group">
-    <label class="title">무게 배분</label>
+    <label class="title">무게 배분 — 출발 낙차 vs 착지 자세 vs 전복</label>
     <div class="seg" id="distSeg">
-      <button data-v="front">앞쏠림<small>코너 불안정</small></button>
-      <button data-v="center" class="on">중앙·낮게<small>최적 안정</small></button>
-      <button data-v="rear">뒤쏠림<small>약간 불안정</small></button>
+      <button data-v="front">앞쏠림<small>착지 유리</small></button>
+      <button data-v="center" class="on">중앙·낮게<small>가장 안전</small></button>
+      <button data-v="rear">뒤쏠림<small>출발 유리·전복↑↑</small></button>
     </div>
   </div>
 
   <div class="group">
     <label class="title">차체 형상</label>
     <div class="seg" id="bodySeg">
-      <button data-v="streamline">스트림라인<small>CdA↓</small></button>
-      <button data-v="standard" class="on">스탠다드</button>
-      <button data-v="wide">와이드+윙<small>안정↑ CdA↑</small></button>
+      <button data-v="streamline">스트림라인<small>저항↓ 하부 약함</small></button>
+      <button data-v="standard" class="on">스탠다드<small>균형</small></button>
+      <button data-v="wide">와이드+윙<small>전복 강함·저항↑</small></button>
     </div>
   </div>
 

@@ -4,27 +4,46 @@ export const G = 9.81;
 const RHO = 1.225; // 공기 밀도 kg/m³
 
 // 휠/액슬 등급 — Crr(구름저항계수), bearing(질량 무관 상수 마찰력 N)
+// muLatMul: 횡그립 배율. 구름저항이 낮은 휠은 트레드가 단단하고 매끄러운 컴파운드라
+//           옆으로도 잘 미끄러진다. 빠른 대신 코너에서 더 밀려 벽을 세게 긁고 전복
+//           위험이 커진다 — 공짜 업그레이드가 아니라 트레이드오프다.
 export const WHEEL_TYPES = {
-  stock: { label: '순정',        crr: 0.018, bearing: 0.0035 },
-  fte:   { label: 'FTE 휠',      crr: 0.011, bearing: 0.0022 },
-  race:  { label: '폴리싱+윤활', crr: 0.007, bearing: 0.0012 },
+  stock: { label: '순정',        crr: 0.018, bearing: 0.0035, muLatMul: 1.00 },
+  fte:   { label: 'FTE 휠',      crr: 0.011, bearing: 0.0022, muLatMul: 0.84 },
+  race:  { label: '폴리싱+윤활', crr: 0.007, bearing: 0.0012, muLatMul: 0.70 },
 };
 
-// 차체 형상 — CdA(항력면적 m²), stability(코너 스크럽 배율: 낮을수록 안정)
+// 액슬 굽힘 한계 — 다이캐스트 액슬은 지름 1mm 남짓의 강선이다. 무게를 계속 실으면
+// 액슬이 휘어 휠이 차체에 쓸리기 시작한다. 이 지점을 넘어서면 무게를 더해도 오히려 느려진다.
+export const AXLE_LOAD_G = 78;   // 이 무게(g)를 넘으면 굽힘이 시작된다
+export const AXLE_BIND = 0.55;   // 최대 하중에서의 구름저항 증가율
+
+// 차체 형상 — CdA(항력면적 m²), bottoming(착지 시 바닥이 닿아 잃는 속도 배율)
+// 폭의 이점은 윤거(전복 저항)로 이미 반영되므로 벽 마찰에 별도 보정을 주지 않는다.
+// (넓다고 벽 마찰계수가 낮아지지는 않는다 — 이중 계산이었다)
+// 대신 넓은 차는 벽까지 여유가 줄어 더 자주·더 오래 긁고, 낮고 좁은 차는 여유가 크지만
+// 바닥이 낮아 착지에서 하부를 찧는다.
+// halfW: 차폭 절반. 넓을수록 윤거가 넓어 전복에 강하지만 벽까지 여유가 줄고 항력이 커진다.
 export const BODY_TYPES = {
-  streamline: { label: '스트림라인', cda: 0.00046, stability: 1.05 },
-  standard:   { label: '스탠다드',   cda: 0.00062, stability: 1.0 },
-  wide:       { label: '와이드+윙',  cda: 0.00078, stability: 0.82 },
+  streamline: { label: '스트림라인', cda: 0.00046, bottoming: 1.85, halfW: 0.0135 },
+  standard:   { label: '스탠다드',   cda: 0.00062, bottoming: 1.0,  halfW: 0.0150 },
+  wide:       { label: '와이드+윙',  cda: 0.00078, bottoming: 0.80, halfW: 0.0170 },
 };
 
-// 무게 배분 — 코너 안정성 (중앙·낮게가 최적: 실제 다이캐스트 튜닝 정설)
+// 무게 배분 — 핀우드 더비에서 가장 유명한 튜닝 포인트.
+// cgLong: 무게중심의 앞뒤 위치(m, +가 앞). 중력 가속은 무게중심이 있는 지점의 경사로
+//   결정되므로, 무게중심이 뒤에 있으면 출발 램프에서 더 높은 곳에 있다가 더 오래 떨어진다
+//   = 낙차(위치에너지)를 더 쓴다 → 빠르다. 실제 더비 정설과 같다.
+// 대신 뒤가 무거우면 미끄러질 때 뒷부분이 크게 흘러(오버스티어) 벽을 비스듬히 때린다
+//   → 트립 전복 위험이 크게 오른다. 빠르지만 위험한 세팅.
 // scrub: 벽 마찰 손실 배율 / yawGain: 미끄러질 때 차체가 돌아가는 정도.
-// 뒤쏠림은 오버스티어처럼 뒷부분이 크게 흘러 벽을 비스듬히 때린다 → 트립 전복 위험↑.
-// 앞쏠림은 앞이 눌려 덜 돌지만 벽을 더 세게 긁는다.
+// landing: 착지 손실 배율. 이 코스의 착지 구간은 급한 내리막이라 기수가 내려간 자세가
+//   지면과 맞아떨어진다. 앞쏠림은 노즈다운으로 날아 착지가 깔끔하고, 뒤쏠림은 꼬리부터
+//   떨어져 크게 잃는다. (반대로 뒤쏠림은 출발 램프에서 무게중심이 높아 초반이 빠르다)
 export const WEIGHT_DIST = {
-  front:  { label: '앞쏠림', scrub: 1.18, yawGain: 1.02 },
-  center: { label: '중앙',   scrub: 0.88, yawGain: 0.86 },
-  rear:   { label: '뒤쏠림', scrub: 1.06, yawGain: 1.18 },
+  front:  { label: '앞쏠림', yawGain: 0.92, cgLong:  0.018, landing: 0.78 },
+  center: { label: '중앙',   yawGain: 0.86, cgLong:  0,     landing: 1.00 },
+  rear:   { label: '뒤쏠림', yawGain: 1.26, cgLong: -0.018, landing: 1.34 },
 };
 
 // 날씨 — 물리 계수 (시각효과가 아니라 실제 동역학에 반영)
@@ -41,7 +60,7 @@ const KK2 = 9.4e-5;
 // 벽에 모서리가 걸릴 때 횡방향 운동량 중 실제로 "넘기는 힘"으로 바뀌는 비율.
 // 벽면은 무게중심 높이를 밀어 지렛대가 없지만, 요각이 붙으면 앞 모서리와 바퀴가
 // 바닥 높이에서 걸리며 트립이 된다.
-const TRIP_EFF = 1.5;
+const TRIP_EFF = 1.15;
 
 // 1차원 트랙 구속 종방향 동역학 + 크레스트 탄도 비행.
 // 실제 다이캐스트 트랙은 측벽이 차를 가두므로 이 모델이 물리적으로 옳다.
@@ -56,8 +75,8 @@ export class CarSim {
     this.mass = cfg.massG / 1000;
     // 휠 회전 관성 → 유효질량 (작지만 실존하는 항)
     this.massEff = this.mass + 0.0024;
-    // 차폭 절반 (와이드 바디는 더 넓음) → 벽까지 남는 횡방향 여유 결정
-    this.halfCarW = cfg.body === 'wide' ? 0.017 : 0.015;
+    // 차폭 절반 → 벽까지 남는 횡방향 여유와 윤거(전복 저항)를 함께 결정한다
+    this.halfCarW = this.body.halfW;
     this.latLimit = track.lateralLimit
       ? track.lateralLimit(cfg.lane, this.halfCarW)
       : { min: -0.0055, max: 0.0055 };
@@ -73,6 +92,12 @@ export class CarSim {
     // 웨이트를 많이 실을수록 바닥 쪽 질량 비중이 커져 무게중심이 더 내려간다
     this.hCG *= 1 - Math.min(0.22, Math.max(0, (cfg.massG - 30) / 90) * 0.22);
     this.ssf = this.tHalf / this.hCG;
+    this.cgLong = this.dist.cgLong;
+    // 횡그립 — 잘 구르는 휠일수록 옆으로도 잘 미끄러진다
+    this.muLat = this.weather.muLat * this.wheel.muLatMul;
+    // 액슬 굽힘 — 한계 하중을 넘으면 휠이 쓸리며 구름저항이 늘어난다
+    const over = Math.max(0, cfg.massG - AXLE_LOAD_G) / (120 - AXLE_LOAD_G);
+    this.crrEff = this.wheel.crr * (1 + over * AXLE_BIND);
     this.reset();
   }
 
@@ -103,12 +128,13 @@ export class CarSim {
     this.finished = false;
     this.stopped = false;
     this.hint = { idx: 0 };
+    this.hintCG = { idx: 0 };
     this.rng = mulberry32(this.cfg.seed >>> 0);
     this.landedImpact = 0;
     // 휠 얼라인먼트 편향 — 액슬이 완벽히 직각인 다이캐스트는 없다. 개체마다 한쪽으로
     // 미세하게 쏠리며, 이것이 직선에서 차가 벽에 붙거나 떨어지는 실제 이유다.
     // 폴리싱·윤활을 한 액슬일수록 정렬이 잘 맞는다.
-    const align = this.wheel.crr > 0.015 ? 0.55 : this.wheel.crr > 0.009 ? 0.34 : 0.20;
+    const align = this.wheel.crr > 0.015 ? 0.70 : this.wheel.crr > 0.009 ? 0.52 : 0.36;
     this.alignBias = (this.rng() - 0.5) * 2 * align;
   }
 
@@ -122,6 +148,11 @@ export class CarSim {
     const t = this.track, lane = this.cfg.lane;
     this.landedImpact = 0;
     const smp = t.laneSample(lane, this.s, this.hint);
+    // 중력은 무게중심이 놓인 지점의 경사로 결정된다. 무게중심이 뒤에 있으면 출발 램프에서
+    // 더 높은 곳에 머물다 더 오래 떨어지므로 총 낙차를 더 쓴다 (핀우드 더비의 정설).
+    const smpCG = this.cgLong
+      ? t.laneSample(lane, Math.max(0, this.s + this.cgLong), this.hintCG)
+      : smp;
     const dyds = smp.dyds;
     const cos = Math.sqrt(Math.max(0.05, 1 - dyds * dyds));
 
@@ -151,12 +182,12 @@ export class CarSim {
       }
       const N = G * cos * Math.max(0.05, Math.min(2.5, nFactor)); // per-mass 수직하중
 
-      let a = -G * dyds; // 중력 사면 성분
+      let a = -G * smpCG.dyds; // 중력 사면 성분 (무게중심 위치 기준)
       // 저항 (v>0일 때만)
       let res = 0;
       if (this.v > 1e-4) {
         // 넘어진 차는 바퀴가 아니라 차체로 미끄러진다 → 구름저항이 폭발적으로 커진다
-        const crr = this.rolled ? 0.42 : this.wheel.crr;
+        const crr = this.rolled ? 0.42 : this.crrEff;
         res += crr * this.weather.crrMul * N;                                // 구름저항
         if (!this.rolled) res += (this.wheel.bearing * this.weather.bearingMul) / this.mass;
         res += (0.5 * RHO * this.body.cda * this.weather.dragMul * this.v * this.v) / this.mass; // 항력
@@ -199,7 +230,10 @@ export class CarSim {
         const trackVy = vNew * smp2.dyds;
         const impact = Math.abs(this.vy - trackVy);
         this.landedImpact = impact;
-        this.v = Math.max(0.2, vNew * Math.max(0.78, 1 - 0.045 * impact));
+        // 무거운 차는 착지 에너지가 크고, 낮은 차는 하부를 찧어 더 잃는다
+        const lossK = 0.040 * this.body.bottoming * this.dist.landing
+          * (1 + Math.max(0, this.cfg.massG - 55) / 120);
+        this.v = Math.max(0.2, vNew * Math.max(0.62, 1 - lossK * impact));
         this.alt = 0; this.vy = 0;
         this.airborne = false;
         this._checkLanding(impact);
@@ -216,7 +250,7 @@ export class CarSim {
     const v2k = this.v * this.v * smp.kh;      // 곡률에 필요한 구심 가속
     const outward = -Math.sign(smp.kh || 1);   // 원심력이 미는 방향 (+1 = 오른쪽)
     const need = Math.abs(v2k);
-    const grip = this.weather.muLat * N;
+    const grip = this.muLat * N;
     const lim = this.latLimit;
 
     // 타이어가 감당하고 남는 몫만큼 차체가 바깥으로 밀려난다
@@ -226,7 +260,7 @@ export class CarSim {
     this.latV += slipA * dt;
     // 얼라인먼트 편향 + 노면 요철에 의한 횡방향 흔들림 (속도가 붙을수록 커진다)
     if (this.v > 0.3) {
-      const rough = (this.rng() - 0.5) * 2 * (0.5 + this.weather.jitter * 6.5);
+      const rough = (this.rng() - 0.5) * 2 * (0.85 + this.weather.jitter * 8);
       this.latV += (this.alignBias * Math.min(1, this.v / 3) + rough) * dt;
     }
     // 그립 범위 안이면 횡속도는 마찰로 잦아든다
@@ -251,7 +285,7 @@ export class CarSim {
     this.wallContact = wallN;
     // 벽 마찰 + 옆차와 비비는 마찰 (후자는 접촉 해석에서 주입된다)
     this.scrub = (wallN > 0
-      ? this.weather.wallMu * wallN * this.body.stability * this.dist.scrub
+      ? this.weather.wallMu * wallN
       : 0) + this.rubScrub;
     this.rubScrub = 0;
     return this.scrub;
@@ -270,7 +304,7 @@ export class CarSim {
     // ① 순수 코너링 전복: 횡가속이 정적전복한계(SSF·g)를 넘어야 한다. 다이캐스트는
     //    μ_lat(0.25~0.55)이 SSF(≈1.6~3.5)보다 훨씬 작아 항상 미끄러짐이 먼저 온다.
     //    그래서 코너를 돈다고 넘어지는 일은 없다 — 실제와 같다.
-    const aTire = Math.min(this.weather.muLat * N, Math.abs(this.v * this.v * smp.kh));
+    const aTire = Math.min(this.muLat * N, Math.abs(this.v * this.v * smp.kh));
     const dir = this.latOutward;
     const crit = Math.atan2(this.tHalf, this.hCG);     // 무게중심이 바깥 바퀴를 넘는 각도
 

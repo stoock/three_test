@@ -107,10 +107,11 @@ const _camRight = new THREE.Vector3();
 function spatial(pos) {
   _rel.subVectors(pos, camera.position);
   const dist = _rel.length();
+  if (!Number.isFinite(dist)) return { dist: 50, panX: 0 };
   camera.getWorldDirection(_camRight);
   _camRight.cross(camera.up).normalize();
   const panX = dist > 1e-4 ? _rel.dot(_camRight) / dist : 0;
-  return { dist, panX };
+  return { dist, panX: Number.isFinite(panX) ? panX : 0 };
 }
 
 /* ---------------- 상태 ---------------- */
