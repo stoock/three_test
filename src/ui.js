@@ -61,6 +61,7 @@ export class UI {
     bindSeg($('distSeg'), (v) => callbacks.onConfig('dist', v));
     bindSeg($('bodySeg'), (v) => callbacks.onConfig('body', v));
     bindSeg($('liverySeg'), (v) => callbacks.onConfig('livery', v));
+    bindSeg($('presetSeg'), (v) => callbacks.onConfig('preset', v));
 
     const ws = $('weightSlider');
     ws.addEventListener('input', () => {
@@ -123,6 +124,7 @@ export class UI {
     setSeg('distSeg', cfg.dist);
     setSeg('bodySeg', cfg.body);
     setSeg('liverySeg', cfg.livery);
+    setSeg('presetSeg', cfg.preset);
     const ws = $('weightSlider');
     ws.value = String(cfg.massG);
     $('weightVal').textContent = cfg.massG + ' g';
@@ -145,6 +147,13 @@ export class UI {
         + '모두 바깥으로 밀려 같은 라인으로 몰리고 서로 부딪힙니다. 이동 거리는 실제로 그린 라인이 결정합니다.'
       : '디바이더가 레인을 갈라놓기 때문에 레인별 실제 길이와 곡률 차이가 그대로 기록 차이가 됩니다.';
   }
+
+  setPresetButton(v) {
+    document.querySelectorAll('#presetSeg button').forEach((b) =>
+      b.classList.toggle('on', b.dataset.v === v));
+  }
+
+  setPresetDesc(text) { $('presetDesc').textContent = text || ''; }
 
   setRivalGroupVisible(on) {
     $('rivalGroup').classList.toggle('hidden', !on);

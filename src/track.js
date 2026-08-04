@@ -260,11 +260,13 @@ export class Track {
     // 단면 프로파일 (lateral, height)
     let prof;
     if (style === 'road') {
-      // 마운틴 로드: 아스팔트 노면 + 양측 콘크리트 방호벽 (디바이더 없음)
+      // 마운틴 로드 단면: 아스팔트 노면 + 양측 낮은 연석(갓길 경계).
+      // 차를 가두는 벽 역할은 연석 위에 세우는 W빔 가드레일이 맡는다 (별도 메시).
+      // 물리상의 벽면 위치는 |lat| = HALF_W − 0.007 로 이전과 동일하다.
+      const EDGE = HALF_W - 0.007;   // 연석 안쪽 면 = 물리적 벽면
       prof = [
-        [-HALF_W, 0.020], [-HALF_W + 0.007, 0.020], [-HALF_W + 0.007, 0],
-        [HALF_W - 0.007, 0], [HALF_W - 0.007, 0.020], [HALF_W, 0.020],
-        [HALF_W, -0.016], [-HALF_W, -0.016],
+        [-HALF_W, -0.016], [-HALF_W, 0.0065], [-EDGE, 0.0065], [-EDGE, 0],
+        [EDGE, 0], [EDGE, 0.0065], [HALF_W, 0.0065], [HALF_W, -0.016],
       ];
       this.trackMat = new THREE.MeshStandardMaterial({
         vertexColors: true, roughness: 0.92, metalness: 0.02, side: THREE.DoubleSide, envMapIntensity: 0.3,
@@ -315,9 +317,9 @@ export class Track {
     geo.setIndex(indices);
     geo.computeVertexNormals();
     if (style === 'road') {
-      // 프로파일 포인트별 색: 방호벽=콘크리트, 노면=아스팔트, 하부=어두운 회색
-      const ptColor = (j) => (j <= 1 || j === 4 || j === 5) ? [0.66, 0.68, 0.71]
-        : (j === 2 || j === 3) ? [0.115, 0.12, 0.135] : [0.09, 0.085, 0.08];
+      // 프로파일 포인트별 색: 연석=콘크리트, 노면=아스팔트, 하부=어두운 회색
+      const ptColor = (j) => (j === 1 || j === 2 || j === 5 || j === 6) ? [0.62, 0.63, 0.65]
+        : (j === 3 || j === 4) ? [0.105, 0.11, 0.125] : [0.075, 0.072, 0.068];
       const colors = new Float32Array(rings.length * P * 3);
       for (let r = 0; r < rings.length; r++) {
         for (let j = 0; j < P; j++) {
@@ -334,10 +336,18 @@ export class Track {
     group.add(mesh);
 
     if (style === 'road') {
-      // 중앙 황색 점선 + 양측 백색 실선
+      // 중앙 황색 점선 + 양측 백색 실선(갓길 경계)
       group.add(this._buildLine(0, 0.0045, 0.0012, 0xd9a733, 5));
-      group.add(this._buildLine(-(HALF_W - 0.011), 0.003, 0.0012, 0xc9ced2, 0));
-      group.add(this._buildLine(HALF_W - 0.011, 0.003, 0.0012, 0xc9ced2, 0));
+      group.add(this._buildLine(-(HALF_W - 0.018), 0.003, 0.0012, 0xc9ced2, 0));
+      group.add(this._buildLine(HALF_W - 0.018, 0.003, 0.0012, 0xc9ced2, 0));
+      // 갓길 럼블 스트립 (짧은 가로줄 반복)
+      group.add(this._buildLine(-(HALF_W - 0.0125), 0.006, 0.0011, 0x9aa0a4, 1));
+      group.add(this._buildLine(HALF_W - 0.0125, 0.006, 0.0011, 0x9aa0a4, 1));
+      // 양측 W빔 가드레일 + 지주
+      group.add(this._buildGuardrail(-(HALF_W - 0.007), -1, terrainHeightFn));
+      group.add(this._buildGuardrail(HALF_W - 0.007, 1, terrainHeightFn));
+      // 급커브 바깥쪽 시선유도 화살표 표지
+      group.add(this._buildChevrons());
     }
 
     // 지지 기둥
@@ -394,6 +404,106 @@ export class Track {
     return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
       color: colorHex, roughness: 0.8, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.3,
     }));
+  }
+
+  // W빔 가드레일 — 실제 산악도로의 그것. 물리적 벽면(lat)에 세워지므로
+  // 차가 밀려 부딪히는 대상이 콘크리트 홈통이 아니라 레일이 된다.
+  _buildGuardrail(lat, side, terrainHeightFn) {
+    const g = new THREE.Group();
+    const rings = this._rings;
+    const railMat = new THREE.MeshStandardMaterial({
+      color: 0xb8bec4, metalness: 0.75, roughness: 0.42, side: THREE.DoubleSide,
+      envMapIntensity: 0.6,
+    });
+    // 상·하 두 줄의 빔으로 W 단면을 흉내낸다
+    for (const [y0, y1, off] of [[0.0105, 0.0155, 0], [0.0155, 0.0205, -0.0012 * side]]) {
+      const positions = [];
+      const indices = [];
+      let vi = 0;
+      for (let r = 0; r < rings.length - 1; r++) {
+        for (const rr of [r, r + 1]) {
+          const i = rings[rr];
+          const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
+          _up.crossVectors(fwd, right).normalize();
+          if (_up.y < 0) _up.negate();
+          for (const h of [y0, y1]) {
+            positions.push(
+              c.x + right.x * (lat + off) + _up.x * h,
+              c.y + right.y * (lat + off) + _up.y * h,
+              c.z + right.z * (lat + off) + _up.z * h);
+          }
+        }
+        indices.push(vi, vi + 1, vi + 3, vi, vi + 3, vi + 2);
+        vi += 4;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, railMat);
+      mesh.castShadow = true;
+      g.add(mesh);
+    }
+
+    // 지주 — 일정 간격으로 연석 위에 박힌다
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x8d949b, metalness: 0.6, roughness: 0.55 });
+    const postGeo = new THREE.BoxGeometry(0.0035, 0.021, 0.0035);
+    for (let r = 4; r < rings.length; r += 9) {
+      const i = rings[r];
+      const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
+      _up.crossVectors(fwd, right).normalize();
+      if (_up.y < 0) _up.negate();
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.position.set(
+        c.x + right.x * lat + _up.x * 0.0075,
+        c.y + right.y * lat + _up.y * 0.0075,
+        c.z + right.z * lat + _up.z * 0.0075);
+      _m.makeBasis(right, _up, new THREE.Vector3(fwd.x, 0, fwd.z).normalize());
+      post.quaternion.setFromRotationMatrix(_m);
+      post.castShadow = true;
+      g.add(post);
+    }
+    return g;
+  }
+
+  // 급커브 바깥쪽 시선유도 표지 (화살표 보드)
+  _buildChevrons() {
+    const g = new THREE.Group();
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#f5c518';
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.moveTo(20, 10); ctx.lineTo(48, 32); ctx.lineTo(20, 54);
+    ctx.lineTo(20, 42); ctx.lineTo(32, 32); ctx.lineTo(20, 22);
+    ctx.closePath(); ctx.fill();
+    const tex = new THREE.CanvasTexture(cv);
+    const signMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, side: THREE.DoubleSide });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.4 });
+    const signGeo = new THREE.PlaneGeometry(0.026, 0.026);
+    const postGeo = new THREE.BoxGeometry(0.003, 0.030, 0.003);
+
+    const lane = this.lanes[LANE_COUNT];
+    for (let i = 20; i < lane.kh.length - 20; i += 4) {
+      if (Math.abs(lane.kh[i]) < 0.85) continue;          // 급커브만
+      if (i % 40 !== 0) continue;                          // 일정 간격으로만
+      const outward = lane.kh[i] > 0 ? -1 : 1;             // 커브 바깥쪽
+      const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
+      const base = c.clone().addScaledVector(right, outward * (HALF_W + 0.016));
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.position.copy(base);
+      post.position.y += 0.015;
+      g.add(post);
+      const sign = new THREE.Mesh(signGeo, signMat);
+      sign.position.copy(base);
+      sign.position.y += 0.034;
+      sign.lookAt(sign.position.clone().addScaledVector(new THREE.Vector3(fwd.x, 0, fwd.z).normalize(), -1));
+      if (outward > 0) sign.rotateY(Math.PI);
+      g.add(sign);
+    }
+    return g;
   }
 
   _buildGate() {

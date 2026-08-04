@@ -291,6 +291,18 @@
   </div>
 
   <div class="group">
+    <label class="title">🚘 차량 프리셋</label>
+    <div class="seg" id="presetSeg">
+      <button data-v="custom" class="on">커스텀</button>
+      <button data-v="muscle">🇺🇸 머슬</button>
+      <button data-v="tuner">🇯🇵 JDM 튜너</button>
+      <button data-v="exotic">🇮🇹 슈퍼카</button>
+      <button data-v="rally">🌧️ 랠리</button>
+    </div>
+    <div class="hint" id="presetDesc"></div>
+  </div>
+
+  <div class="group">
     <label class="title">차량 총중량</label>
     <div class="rowval"><span>다이캐스트 + 웨이트</span><b id="weightVal">55 g</b></div>
     <input type="range" id="weightSlider" min="30" max="120" value="55" step="1"/>

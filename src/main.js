@@ -38,6 +38,33 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enabled = false;
 
+/* ---------------- 차량 프리셋 ---------------- */
+// 영화에 나올 법한 캐릭터를 가진 빌드들. 각각 앞서 만든 트레이드오프의 서로 다른 지점에
+// 서 있어서, 프리셋을 고르는 것만으로 성격이 확 달라진다. (상표는 쓰지 않는다)
+const CAR_PRESETS = {
+  custom: { label: '커스텀', desc: '직접 조합' },
+  muscle: {
+    label: '🇺🇸 머슬', desc: '95g · 무겁고 뒤가 눌린 드래그 셋업. 와이드 바디가 아니면 넘어간다',
+    silhouette: 'muscle',
+    cfg: { massG: 95, wheel: 'fte', dist: 'rear', body: 'wide', color: CAR_COLORS[0], livery: 'stripe' },
+  },
+  tuner: {
+    label: '🇯🇵 JDM 튜너', desc: '60g · 가볍고 매끈. 저항이 적어 미끄러운 날씨에 강하다',
+    silhouette: 'tuner',
+    cfg: { massG: 60, wheel: 'race', dist: 'center', body: 'streamline', color: CAR_COLORS[1], livery: 'number' },
+  },
+  exotic: {
+    label: '🇮🇹 슈퍼카', desc: '80g · 최속 지향. 앞쏠림이라 착지는 좋지만 전복 위험이 있다',
+    silhouette: 'exotic',
+    cfg: { massG: 80, wheel: 'race', dist: 'front', body: 'streamline', color: CAR_COLORS[3], livery: 'stripe' },
+  },
+  rally: {
+    label: '🌧️ 랠리', desc: '85g · 그립 좋은 순정 휠. 느리지만 비·눈에서 절대 안 넘어간다',
+    silhouette: 'rally',
+    cfg: { massG: 85, wheel: 'stock', dist: 'center', body: 'standard', color: CAR_COLORS[2], livery: 'number' },
+  },
+};
+
 /* ---------------- 설정 (localStorage 저장/복원) ---------------- */
 const RIVAL_PRESETS = {
   mirror: { label: '동일 스펙', color: CAR_COLORS[1], from: 'player' },
@@ -51,9 +78,10 @@ const config = {
   dist: 'center', body: 'standard', color: CAR_COLORS[0],
   livery: 'number', style: 'classic', seed: 12345,
   mode: 'solo', ghost: 'off', rivalPreset: 'mirror', sound: 'on',
+  preset: 'custom',
 };
 const CFG_KEYS = ['weather', 'lane', 'massG', 'wheel', 'dist', 'body', 'color', 'livery',
-  'style', 'mode', 'ghost', 'rivalPreset', 'sound'];
+  'style', 'mode', 'ghost', 'rivalPreset', 'sound', 'preset'];
 try {
   const saved = JSON.parse(localStorage.getItem('hwd_config') || 'null');
   if (saved) for (const k of CFG_KEYS) if (k in saved) config[k] = saved[k];
@@ -190,6 +218,7 @@ function makeCar(cfg, role) {
   const model = buildCar({
     color: cfg.color, body: cfg.body, wheel: cfg.wheel, livery: cfg.livery,
     massG: cfg.massG, dist: cfg.dist, num: role === 'rival' ? 7 : 5,
+    silhouette: CAR_PRESETS[cfg.preset]?.silhouette,
   });
   scene.add(model.group);
   const sim = new CarSim(track, simConfig(cfg));
@@ -285,6 +314,23 @@ function updateBlob(blob, pos, alt) {
 /* ---------------- UI ---------------- */
 const ui = new UI(track, {
   onConfig(key, val) {
+    if (key === 'preset') {
+      const p = CAR_PRESETS[val];
+      config.preset = val;
+      if (p?.cfg) Object.assign(config, p.cfg);
+      saveConfig();
+      ui.applyConfig(config);
+      ui.setPresetDesc(p?.desc || '');
+      if (state === 'setup') { rebuildCars(); ui.setRivalHint(config.mode === 'duel' ? rivalConfig() : null); }
+      return;
+    }
+    // 세부 항목을 직접 건드리면 더 이상 프리셋 그대로가 아니다
+    if (['massG', 'wheel', 'dist', 'body', 'livery', 'color'].includes(key)
+      && config.preset !== 'custom') {
+      config.preset = 'custom';
+      ui.setPresetButton('custom');
+      ui.setPresetDesc(CAR_PRESETS.custom.desc);
+    }
     config[key] = val;
     saveConfig();
     if (key === 'weather') { env.setWeather(val); audio.setWeather(val); }
@@ -942,6 +988,7 @@ track.buildMesh(scene, heightFn, config.style);
 env.setWeather(config.weather);
 ui.setLaneMode(config.style);
 ui.applyConfig(config);
+ui.setPresetDesc(CAR_PRESETS[config.preset]?.desc || '');
 rebuildCars();
 ui.showSetup();
 ui.setSoundButton(config.sound === 'on');

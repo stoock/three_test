@@ -25,9 +25,36 @@ const PROFILES = {
 };
 PROFILES.wide = PROFILES.standard;
 
+// 프리셋별 실루엣 — 물리는 차체 형상(스트림/스탠다드/와이드)이 결정하고,
+// 실루엣은 생김새만 바꾼다.
+PROFILES.muscle = [                       // 긴 보닛 + 각진 노치백
+  [-0.033, 0.005], [-0.033, 0.0165], [-0.028, 0.0198], [-0.016, 0.0222],
+  [-0.002, 0.0222], [0.006, 0.0168], [0.030, 0.0152], [0.034, 0.0118],
+  [0.034, 0.005],
+];
+PROFILES.tuner = [                        // 짧은 노즈 + 해치백 루프라인
+  [-0.033, 0.005], [-0.033, 0.0135], [-0.030, 0.0186], [-0.018, 0.0214],
+  [0.004, 0.0206], [0.016, 0.0140], [0.028, 0.0116], [0.034, 0.0082],
+  [0.034, 0.005],
+];
+PROFILES.exotic = [                       // 극단적으로 낮은 웨지 + 캡포워드
+  [-0.033, 0.005], [-0.033, 0.0126], [-0.022, 0.0150], [-0.012, 0.0182],
+  [0.006, 0.0176], [0.016, 0.0116], [0.028, 0.0092], [0.034, 0.0068],
+  [0.034, 0.005],
+];
+PROFILES.rally = [                        // 높은 그린하우스 + 짧은 오버행
+  [-0.033, 0.005], [-0.033, 0.0158], [-0.027, 0.0196], [-0.015, 0.0236],
+  [0.004, 0.0236], [0.014, 0.0166], [0.026, 0.0140], [0.033, 0.0104],
+  [0.034, 0.005],
+];
+
 const GLASS = {
   standard:   [[0.0125, 0.0146], [0.0005, 0.0218], [-0.0135, 0.0218], [-0.023, 0.0146]],
   streamline: [[0.0135, 0.0120], [0.0025, 0.0184], [-0.0105, 0.0184], [-0.0215, 0.0120]],
+  muscle:     [[0.0075, 0.0176], [-0.0025, 0.0228], [-0.0155, 0.0228], [-0.0255, 0.0176]],
+  tuner:      [[0.0165, 0.0148], [0.0025, 0.0220], [-0.0175, 0.0220], [-0.0285, 0.0150]],
+  exotic:     [[0.0155, 0.0122], [0.0055, 0.0182], [-0.0115, 0.0182], [-0.0205, 0.0132]],
+  rally:      [[0.0135, 0.0176], [0.0035, 0.0242], [-0.0145, 0.0242], [-0.0255, 0.0172]],
 };
 GLASS.wide = GLASS.standard;
 
@@ -75,6 +102,7 @@ function numberTexture(num) {
 export function buildCar({
   color = 0xd32f2f, body = 'standard', wheel = 'stock',
   livery = 'number', massG = 55, dist = 'center', num = 5,
+  silhouette = null,
 } = {}) {
   const g = new THREE.Group();
   const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.72, roughness: 0.22, envMapIntensity: 1.15 });
@@ -86,7 +114,8 @@ export function buildCar({
 
   const wide = body === 'wide';
   const W = wide ? 0.034 : 0.030;
-  const prof = PROFILES[body] || PROFILES.standard;
+  const shape = (silhouette && PROFILES[silhouette]) ? silhouette : body;
+  const prof = PROFILES[shape] || PROFILES.standard;
 
   // 섀시
   const chassis = new THREE.Mesh(new THREE.BoxGeometry(W - 0.004, 0.0035, 0.064), dark);
@@ -98,7 +127,8 @@ export function buildCar({
   g.add(hull);
 
   // 글라스 캐노피 (차체 베벨 위로 살짝 돌출)
-  const glass = new THREE.Mesh(extrudeBody(GLASS[body] || GLASS.standard, W - 0.008, 0.0012, 0.0018), glassMat);
+  const glass = new THREE.Mesh(
+    extrudeBody(GLASS[shape] || GLASS.standard, W - 0.008, 0.0012, 0.0018), glassMat);
   g.add(glass);
 
   // 레이싱 스트라이프 — 동일 실루엣을 차체 베벨 위로 띄워 좁게 압출 → 곡면을 그대로 따라감
@@ -122,6 +152,55 @@ export function buildCar({
       r.position.set(sx * (W / 2 + 0.0002), 0.0122, 0.0015);
       r.rotation.y = sx * Math.PI / 2;
       g.add(r);
+    }
+  }
+
+  // 프리셋 고유 디테일
+  const trim = new THREE.MeshStandardMaterial({ color: 0x1a1d22, metalness: 0.5, roughness: 0.45 });
+  if (shape === 'muscle') {
+    // 보닛 스쿠프
+    const scoop = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.004, 0.016), trim);
+    scoop.position.set(0, 0.0170, 0.019);
+    g.add(scoop);
+  } else if (shape === 'tuner') {
+    // 큼직한 리어 윙 (차체 형상과 무관하게 튜너의 상징)
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(W + 0.003, 0.0016, 0.0062), trim);
+    wing.position.set(0, 0.0222, -0.0285);
+    wing.rotation.x = -0.10;
+    g.add(wing);
+    for (const sx of [-1, 1]) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.0015, 0.005, 0.0028), trim);
+      strut.position.set(sx * (W / 2 - 0.005), 0.0198, -0.0285);
+      g.add(strut);
+    }
+  } else if (shape === 'exotic') {
+    // 리어 디퓨저 + 사이드 인테이크
+    const diff = new THREE.Mesh(new THREE.BoxGeometry(W - 0.004, 0.0035, 0.006), trim);
+    diff.position.set(0, 0.0068, -0.031);
+    g.add(diff);
+    for (const sx of [-1, 1]) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(0.0022, 0.004, 0.011), trim);
+      vent.position.set(sx * (W / 2 - 0.0004), 0.0118, -0.011);
+      g.add(vent);
+    }
+  } else if (shape === 'rally') {
+    // 루프 라이트바 + 머드플랩
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(W * 0.7, 0.0035, 0.005), trim);
+    bar.position.set(0, 0.0258, 0.012);
+    g.add(bar);
+    const lampMat = new THREE.MeshStandardMaterial({
+      color: 0xfff4d0, emissive: 0xffe9b0, emissiveIntensity: 0.6, roughness: 0.3,
+    });
+    for (const sx of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.0018, 0.0018, 0.002, 8), lampMat);
+      lamp.rotation.x = Math.PI / 2;
+      lamp.position.set(sx * 0.005, 0.0258, 0.0145);
+      g.add(lamp);
+    }
+    for (const sz of [-1, 1]) {
+      const flap = new THREE.Mesh(new THREE.BoxGeometry(W - 0.002, 0.005, 0.0015), trim);
+      flap.position.set(0, 0.0042, sz * 0.030);
+      g.add(flap);
     }
   }
 
