@@ -312,6 +312,24 @@ export class RaceAudio {
     this._burst({ freq: 1800 + k * 1600, q: 2.2, gain: 0.06 + k * 0.26, dur: 0.045 + k * 0.05, dist });
   }
 
+  // 사고 — 전복은 차체가 트랙을 긁으며 구르는 둔탁한 연속음,
+  // 코스 이탈은 벽을 넘는 순간의 큰 충격 + 멀어지는 소리
+  crash(kind, dist = 1) {
+    if (!this.ready || !this.enabled) return;
+    const heavy = kind === 'vault' || kind === 'launched';
+    this._burst({ freq: 220, q: 0.7, gain: heavy ? 0.55 : 0.42, dur: 0.22, dist });
+    this._tone({ freq: 120, slideTo: 55, dur: 0.30, gain: 0.20, type: 'sine' });
+    // 구르며 부딪히는 연타
+    const n = heavy ? 5 : 3;
+    for (let i = 1; i <= n; i++) {
+      setTimeout(() => this._burst({
+        freq: 900 + Math.random() * 1800, q: 2, gain: 0.22 - i * 0.03,
+        dur: 0.06, dist,
+      }), i * (95 + Math.random() * 60));
+    }
+    if (heavy) this._burst({ freq: 3000, q: 1.2, gain: 0.16, dur: 0.35, type: 'highpass', dist });
+  }
+
   gateRelease() {
     this._burst({ freq: 2200, q: 2, gain: 0.30, dur: 0.06 });
     this._tone({ freq: 620, slideTo: 240, dur: 0.10, gain: 0.12, type: 'square' });

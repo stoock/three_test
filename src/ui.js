@@ -266,8 +266,21 @@ export class UI {
 
   showResults(res) {
     this.els.results.classList.remove('hidden');
-    $('resTitle').textContent = res.dnf ? '💤 완주 실패 (DNF)' : '🏆 FINISH!';
+    $('resTitle').textContent = res.incident
+      ? (res.incident === 'vault' || res.incident === 'launched' ? '🚀 코스 이탈 (DNF)' : '💥 크래시 (DNF)')
+      : res.dnf ? '💤 완주 실패 (DNF)' : '🏆 FINISH!';
     $('resSub').textContent = res.sub;
+    // 사고 리포트 — 무엇이 왜 일어났는지
+    const inc = $('resIncident');
+    if (res.incident) {
+      inc.classList.remove('hidden');
+      inc.innerHTML = `<b>${res.incidentLabel}</b>`
+        + `<div class="why">정적전복한계 SSF ${res.ssf.toFixed(2)}`
+        + ` (윤거 절반 ÷ 무게중심 높이 — 높을수록 안 넘어짐)<br>`
+        + '무게를 더 싣고 중앙·낮게 배분하거나, 와이드 바디로 윤거를 넓히면 사고율이 0이 됩니다.'
+        + ' 디바이더가 있는 클래식 트랙에서는 전복이 일어나지 않습니다.</div>';
+    } else inc.classList.add('hidden');
+
     $('resRank').textContent = res.dnf || !res.rank ? ''
       : (res.rank === 1 ? '🥇 신기록! ' : '') + `전체 랭킹 ${res.rank}위 / ${res.rankTotal}개 기록`
         + (res.ghostUpdated ? ' · 👻 고스트 갱신' : '');

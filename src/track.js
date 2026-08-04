@@ -215,13 +215,17 @@ export class Track {
         Math.atan2(opts.vy ?? 0, Math.max(0.4, v))));
       _q2.setFromAxisAngle(_X, -pitch);
       _q.multiply(_q2);
+      if (opts.roll) { _q2.setFromAxisAngle(_Z, -opts.roll); _q.multiply(_q2); }
     } else {
       _right.set(_fwd.z, 0, -_fwd.x).normalize();
       _up.crossVectors(_fwd, _right).normalize();
       if (_up.y < 0) { _up.negate(); _right.negate(); }
       _m.makeBasis(_right, _up, _fwd);
       _q.setFromRotationMatrix(_m);
-      const roll = Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012));
+      // 물리에서 계산된 실제 차체 기울기 (전복 중이면 크게 넘어간다)
+      const roll = opts.roll !== undefined
+        ? -opts.roll
+        : Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012));
       if (roll) { _q2.setFromAxisAngle(_Z, roll); _q.multiply(_q2); }
       // 옆으로 미끄러지는 만큼 차체가 비스듬히 틀어진다 (벽을 긁을 때의 그 자세)
       const yaw = Math.max(-0.28, Math.min(0.28, Math.atan2(opts.latV || 0, Math.max(0.5, v))));
@@ -459,7 +463,7 @@ export class Track {
   }
 
   // 중계 카메라 포인트: 커브 바깥쪽에 배치, s 구간 담당
-  buildBroadcastCams() {
+  buildBroadcastCams(terrainHeightFn) {
     const cams = [];
     const lane = this.lanes[1];
     const stepS = 2.6;
@@ -470,6 +474,10 @@ export class Track {
       const side = lane.kh[i] > 0.05 ? -1 : 1; // 커브 바깥쪽
       const pos = c.clone().addScaledVector(right, side * 0.75);
       pos.y += 0.38;
+      // 카메라가 지형에 파묻히지 않도록 (평지 런아웃 구간에서 특히 중요)
+      if (terrainHeightFn) {
+        pos.y = Math.max(pos.y, terrainHeightFn(pos.x, pos.z) + 0.3);
+      }
       cams.push({ pos, sStart: s - stepS * 0.55, sEnd: s + stepS * 0.55 });
     }
     return cams;

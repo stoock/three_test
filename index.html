@@ -185,6 +185,12 @@
     margin: -6px 0 12px; font-size: 13px; font-weight: 700; color: var(--accent2);
   }
   #resRankBtn { background: rgba(255,179,0,0.16); color: #ffd58a; }
+  #resIncident {
+    margin: 0 0 10px; padding: 10px 12px; border-radius: 9px;
+    background: rgba(255,60,60,0.12); border: 1px solid rgba(255,90,90,0.35);
+    font-size: 13px; color: #ff9d9d; line-height: 1.5;
+  }
+  #resIncident .why { margin-top: 4px; font-size: 11px; color: var(--muted); }
   #resVersus {
     margin: 0 0 12px; padding: 10px 12px; border-radius: 9px;
     background: rgba(255,255,255,0.05); font-size: 12.5px; line-height: 1.7;
@@ -337,7 +343,9 @@
 
   <div class="physNote">
     ⚙️ 모든 수치는 SI 단위 실물 스케일(차 68mm / 트랙 27m / 낙차 2.5m, g=9.81)로 240Hz
-    고정 스텝 적분됩니다. 세팅·날씨가 바뀌면 기록은 물론 점프 성공 여부·완주 여부까지 달라집니다.
+    고정 스텝 적분됩니다. 핸들이 없으므로 코너에서는 원심력에 밀려 벽을 긁으며 돌고,
+    비스듬히 벽을 때리면 <b>전복</b>하거나 코스를 이탈합니다.
+    무게를 <b>중앙에 낮게</b> 싣거나 <b>와이드 바디</b>로 윤거를 넓히면 넘어가지 않습니다.
   </div>
 </div>
 
@@ -370,6 +378,7 @@
 <div id="resultsPanel" class="panel hidden">
   <h2 id="resTitle">🏆 FINISH!</h2>
   <div class="sub" id="resSub"></div>
+  <div id="resIncident" class="hidden"></div>
   <div id="resRank"></div>
   <div id="resVersus"></div>
   <div class="resGrid">

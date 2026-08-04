@@ -15,11 +15,13 @@ export class Recorder {
   // 하위 호환: 단일 차량 접근
   get frames() { return this.tracks[0]; }
 
-  // 프레임: [t, s, v, alt, scrub, airborne(0/1), impact, vy, lat, latV, wallContact]
+  // 프레임: [t, s, v, alt, scrub, airborne, impact, vy, lat, latV, wallContact, roll, crashed]
+  // crashed: 0=정상, 1=전복, 2=코스 이탈
   push(t, car, trackIdx = 0) {
     this.tracks[trackIdx].push([t, car.s, car.v, car.alt, car.scrub,
       car.airborne ? 1 : 0, car.landedImpact, car.airborne ? car.vy : 0,
-      car.lat, car.latV, car.wallContact]);
+      car.lat, car.latV, car.wallContact, car.roll,
+      car.off ? 2 : car.rolled ? 1 : 0]);
   }
   get duration() {
     let d = 0;
@@ -109,6 +111,17 @@ export class Recorder {
       }
     }
 
+    // 사고 순간 (전복·코스 이탈)
+    for (let i = 1; i < F.length; i++) {
+      if ((F[i - 1][12] ?? 0) === 0 && (F[i][12] ?? 0) > 0) {
+        hl.push({
+          t: Math.max(0, F[i][0] - 0.5), slow: true, incident: true,
+          label: (F[i][12] === 2) ? '🚀 코스 이탈' : '💥 전복 순간',
+        });
+        break;
+      }
+    }
+
     if (finishTime != null) hl.push({ t: finishTime, label: '🏁 피니시', slow: true });
     hl.sort((a, b) => a.t - b.t);
     return hl;
@@ -154,6 +167,8 @@ export class Player {
       vy: lerp(a[7] ?? 0, b[7] ?? 0),
       lat: lerp(a[8] ?? 0, b[8] ?? 0), latV: lerp(a[9] ?? 0, b[9] ?? 0),
       wallContact: lerp(a[10] ?? 0, b[10] ?? 0),
+      roll: lerp(a[11] ?? 0, b[11] ?? 0),
+      rolled: (a[12] ?? 0) >= 1, off: (a[12] ?? 0) >= 2,
       impact: Math.max(a[6] ?? 0, b[6] ?? 0),
     };
   }

@@ -32,7 +32,7 @@ camera.position.set(-2.5, 3.6, -2.5);
 const track = new Track();
 const env = new Environment(scene, track);
 const heightFn = (x, z) => env.heightAt(x, z);
-const broadcastCams = track.buildBroadcastCams();
+const broadcastCams = track.buildBroadcastCams(heightFn);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -196,6 +196,7 @@ function makeCar(cfg, role) {
     sim, model, role, blob: makeBlob(),
     finishTime: null, splits: [], cpNext: 0, stallT: 0,
     landT: -10, landImpact: 0, lastWallSfx: -10, contactSfx: 0,
+    incidentSeen: null, incidentT: 0, offLanded: false,
   };
 }
 
@@ -258,7 +259,8 @@ function refreshGhostModel() {
 function placeCar(c, snap = false) {
   const { sim, model } = c;
   track.placeCar(model.group, sim.cfg.lane, sim.s, sim.alt, sim.v,
-    { airborne: sim.airborne, vy: sim.vy, lat: sim.lat, latV: sim.latV, snap });
+    { airborne: sim.airborne, vy: sim.vy, lat: sim.lat, latV: sim.latV,
+      roll: sim.roll, snap });
   updateBlob(c.blob, model.group.position, sim.alt);
 }
 
@@ -267,7 +269,8 @@ function placeGhost(t, snap = false) {
   const smp = ghost.player.sample(t);
   if (!smp) return;
   track.placeCar(ghost.model.group, ghost.lane, smp.s, smp.alt, smp.v,
-    { airborne: smp.airborne, vy: smp.vy, lat: smp.lat, latV: smp.latV, snap });
+    { airborne: smp.airborne, vy: smp.vy, lat: smp.lat, latV: smp.latV,
+      roll: smp.roll, snap });
   ghost.model.spinWheels(smp.v, 1 / 60);
   return smp;
 }
@@ -419,6 +422,30 @@ function stepCar(c, i) {
     c.lastWallSfx = raceT;
     audio.wallHit(sim.wallHit, spatial(c.model.group.position).dist);
   }
+  // 사고 발생 — 전복 / 코스 이탈
+  if (sim.incident && !c.incidentSeen) {
+    c.incidentSeen = sim.incident;
+    c.incidentT = raceT;
+    const d = spatial(c.model.group.position).dist;
+    audio.crash(sim.incident, d);
+    if (c.role === 'player') {
+      ui.toast(INCIDENT_LABEL[sim.incident] || '💥 사고');
+    }
+  }
+  // 이탈한 차가 지면에 닿으면 그 자리에서 멈춘다
+  if (sim.off) {
+    const groundAlt = groundAltBelow(c);
+    if (sim.alt <= groundAlt) {
+      sim.alt = groundAlt;
+      if (!c.offLanded) {
+        c.offLanded = true;
+        audio.landing(2.2, spatial(c.model.group.position).dist);
+      }
+      sim.v *= Math.exp(-6 * PHYS_DT);
+      sim.latV *= Math.exp(-6 * PHYS_DT);
+      sim.rollV *= Math.exp(-5 * PHYS_DT);
+    }
+  }
   // 체크포인트 (플레이어만 토스트)
   if (c.cpNext < lane.cpS.length && sim.s >= lane.cpS[c.cpNext]) {
     c.splits.push(raceT);
@@ -448,6 +475,23 @@ function stepCar(c, i) {
 // 차대차 접촉 — 마운틴 로드처럼 레인 디바이더가 없는 코스에서만 일어난다.
 // 코너에서 바깥으로 밀린 차들이 같은 라인으로 몰리면서 서로 부딪히고, 그 충격으로
 // 경로가 바뀌어 한쪽이 방호벽으로 밀려나기도 한다. (클래식 트랙은 디바이더가 막아준다)
+const INCIDENT_LABEL = {
+  rollover: '💥 전복! 벽에 걸려 넘어갔습니다',
+  'crash-landing': '💥 착지 실패 — 기운 채로 떨어져 뒤집혔습니다',
+  vault: '🚀 코스 이탈! 벽을 넘어 날아갔습니다',
+  launched: '💥 접촉으로 튕겨 날아갔습니다',
+};
+const INCIDENT_SHORT = {
+  rollover: '전복', 'crash-landing': '착지 실패', vault: '코스 이탈', launched: '접촉 사고',
+};
+
+// 이탈한 차 아래의 지면 높이 → 트랙면 기준 상대 고도로 환산
+function groundAltBelow(c) {
+  const p = c.model.group.position;
+  const g = env.heightAt(p.x, p.z);
+  return (g + 0.006) - (p.y - c.sim.alt);
+}
+
 const CAR_HALF_LEN = 0.034;
 const MU_SIDE = 0.14;          // 차체 옆면끼리 비빌 때의 마찰계수
 const touching = new Map();    // 쌍별 접촉 지속 여부
@@ -485,6 +529,12 @@ function resolveContacts() {
         if (hit > 0.05) {
           cars[i].contactSfx = Math.max(cars[i].contactSfx, hit);
           cars[j].contactSfx = Math.max(cars[j].contactSfx, hit);
+          // 휠 인터록 — 바퀴가 맞물리면 한쪽이 그대로 튕겨 넘어간다.
+          // 가벼운 쪽이 더 큰 속도 변화를 받으므로 위험도 크다.
+          if (hit > 0.3) {
+            A.tripBy(hit * (mB / mSum) * 1.25, -dir);
+            B.tripBy(hit * (mA / mSum) * 1.25, dir);
+          }
         }
       }
 
@@ -516,11 +566,12 @@ function resolveContacts() {
 }
 
 function raceOver() {
-  // 모든 차가 (완주 후 정지 | 완주 후 6초 경과 | 2초 이상 실속) 이면 종료
+  // 모든 차가 (완주 후 정지 | 완주 후 6초 경과 | 2초 이상 실속 | 이탈 후 착지) 이면 종료
   return cars.every((c) =>
     (c.finishTime != null && c.sim.v < 0.01)
     || (c.finishTime != null && raceT > c.finishTime + 6)
-    || c.stallT > 2.0) || raceT > 90;
+    || c.stallT > 2.0
+    || (c.sim.off && c.offLanded && c.sim.v < 0.15)) || raceT > 90;
 }
 
 function stepRace(dt) {
@@ -630,9 +681,12 @@ function endRace() {
     jumpDist: jumpMax,
     splits: me.splits,
     contacts: contactCount,
+    incident: me.sim.incident,
+    incidentLabel: me.sim.incident ? INCIDENT_LABEL[me.sim.incident] : null,
+    ssf: me.sim.ssf,
     sub: `${emoji} ${w.label} · ${config.lane + 1}${config.style === 'road' ? '번 위치' : '레인'}`
       + ` · ${config.massG}g · ${wt.label} · ${d.label} 배분 · ${b.label}`
-      + (dnf ? ' — 저항을 이기지 못하고 트랙 위에서 멈췄습니다' : ''),
+      + (dnf && !me.sim.incident ? ' — 저항을 이기지 못하고 트랙 위에서 멈췄습니다' : ''),
     versus: [],
   };
 
@@ -829,7 +883,7 @@ function animate() {
       if (!smp || !cars[i]) return;
       const c = cars[i];
       track.placeCar(c.model.group, c.sim.cfg.lane, smp.s, smp.alt, smp.v,
-        { airborne: smp.airborne, vy: smp.vy, lat: smp.lat, latV: smp.latV });
+        { airborne: smp.airborne, vy: smp.vy, lat: smp.lat, latV: smp.latV, roll: smp.roll });
       updateBlob(c.blob, c.model.group.position, smp.alt);
       c.model.spinWheels(smp.v, dt * player.speed);
       c.model.applySquash(999, 0);
