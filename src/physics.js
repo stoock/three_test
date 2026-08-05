@@ -98,6 +98,11 @@ export class CarSim {
     // 액슬 굽힘 — 한계 하중을 넘으면 휠이 쓸리며 구름저항이 늘어난다
     const over = Math.max(0, cfg.massG - AXLE_LOAD_G) / (120 - AXLE_LOAD_G);
     this.crrEff = this.wheel.crr * (1 + over * AXLE_BIND);
+    // 노면 크라운 계수 — h(lat) = −crown·lat². 도로 폭 끝에서 약 2mm 낮아지는 배수 구배.
+    // 칸막이가 없는 로드 코스에만 존재한다 (플라스틱 트랙은 평평하다).
+    this.crown = track.style === 'road' ? 0.32 : 0;
+    // 뱅크는 로드 코스에만 (플라스틱 4레인 트랙은 평평하다)
+    this.bankOn = track.style === 'road';
     this.reset();
   }
 
@@ -136,6 +141,20 @@ export class CarSim {
     // 폴리싱·윤활을 한 액슬일수록 정렬이 잘 맞는다.
     const align = this.wheel.crr > 0.015 ? 0.70 : this.wheel.crr > 0.009 ? 0.52 : 0.36;
     this.alignBias = (this.rng() - 0.5) * 2 * align;
+
+    // 출발 편차 — 차를 손으로 슬롯에 놓는 순간부터 완벽히 같을 수 없다.
+    // 게이트 바가 쓸고 지나가며 주는 미세한 옆 힘까지 더해져, 매번 조금씩 다른 위치·자세로
+    // 출발한다. 실제 대회에서 같은 차를 같은 레인에 놓아도 기록이 흔들리는 첫 번째 이유다.
+    const room = (this.latLimit.max - this.latLimit.min) * 0.5;
+    const place = Math.min(0.004, room * 0.45);
+    this.lat += (this.rng() - 0.5) * 2 * place;
+    this.latV = (this.rng() - 0.5) * 2 * 0.03;
+
+    // 휠 불균형 — 다이캐스트 휠은 완벽한 원판이 아니다. 회전하며 수직하중을 주기적으로
+    // 흔들어 그립을 변조한다. 매 주행마다 휠이 멈춰 있던 위상이 달라 같은 코너에서도
+    // 미끄러지기 시작하는 순간이 달라진다.
+    this.imbAmp = 0.02 + this.rng() * 0.05;
+    this.imbPhase = this.rng() * Math.PI * 2;
   }
 
   // 사고 발생 — 한 번만 기록한다
@@ -180,7 +199,12 @@ export class CarSim {
         this.scrub = 0;
         return;
       }
-      const N = G * cos * Math.max(0.05, Math.min(2.5, nFactor)); // per-mass 수직하중
+      let N = G * cos * Math.max(0.05, Math.min(2.5, nFactor)); // per-mass 수직하중
+      // 휠 회전에 동기된 하중 변동 (불균형에 의한 홉)
+      if (this.v > 0.5) {
+        const wheelAng = this.s / 0.0045;              // 휠 반지름으로 나눈 누적 회전각
+        N *= 1 + this.imbAmp * Math.sin(wheelAng + this.imbPhase);
+      }
 
       let a = -G * smpCG.dyds; // 중력 사면 성분 (무게중심 위치 기준)
       // 저항 (v>0일 때만)
@@ -247,24 +271,41 @@ export class CarSim {
   // 종방향 감속(스크럽)이 된다 → 벽에 닿아 있을 때만 스크럽이 발생한다.
   // 반환값: 종방향 감속량 (per-mass, m/s²)
   _lateral(smp, N, dt) {
-    const v2k = this.v * this.v * smp.kh;      // 곡률에 필요한 구심 가속
-    const outward = -Math.sign(smp.kh || 1);   // 원심력이 미는 방향 (+1 = 오른쪽)
-    const need = Math.abs(v2k);
-    const grip = this.muLat * N;
+    // 뱅크(캔트)가 있는 노면 위의 힘 평형.
+    //   필요 구심가속 a_c = v²·κ
+    //   경사면 기준 타이어가 실제로 내야 하는 횡력  = a_c·cosφ − g·sinφ
+    //   경사면에 수직한 하중                        = g·cosφ + a_c·sinφ
+    // 뱅크가 구심력을 대신 받쳐주므로, 설계속도 부근에서는 타이어 부담이 0에 가까워진다.
+    // 이때 차는 벽에 눌리지 않고 노면 어디에도 머물 수 있는 *중립* 상태가 되어,
+    // 아주 작은 속도차가 위로 흐를지 아래로 흐를지를 가른다 — 발산 지점이다.
+    const phi = this.bankOn ? Math.abs(smp.bank) : 0;
+    const cosP = Math.cos(phi), sinP = Math.sin(phi);
+    const aC = this.v * this.v * Math.abs(smp.kh);
+    const outward = -Math.sign(smp.kh || 1);   // 원심력이 미는 방향 (뱅크의 높은 쪽)
+
+    const needTire = aC * cosP - G * sinP;     // + 바깥(위)으로, − 안쪽(아래)으로
+    const Nb = N * cosP + aC * sinP;           // 노면 수직하중
+    const grip = this.muLat * Nb;
     const lim = this.latLimit;
 
-    // 타이어가 감당하고 남는 몫만큼 차체가 바깥으로 밀려난다
-    this.latDemand = Math.max(0, need - grip);   // 벽·옆차로 전달되는 초과 횡력 (per-mass)
-    this.latOutward = outward;
-    const slipA = this.latDemand * outward;
-    this.latV += slipA * dt;
+    // 타이어가 감당하고 남는 몫만큼 차체가 미끄러진다 (위로든 아래로든)
+    this.latDemand = Math.max(0, Math.abs(needTire) - grip);
+    const slipDir = (needTire >= 0 ? 1 : -1) * outward;
+    this.latOutward = slipDir;
+    this.latV += this.latDemand * slipDir * dt;
+    // 그립 범위 안이면 횡속도는 마찰로 잦아든다
+    if (this.latDemand <= 0) this.latV *= Math.exp(-8 * dt);
+
+    // 노면 크라운 — 실제 도로는 배수를 위해 가운데가 볼록하다. 중앙선 부근은
+    // *불안정 평형*이어서, 어느 쪽으로 조금이라도 벗어나면 그쪽으로 계속 흘러내린다.
+    if (this.crown > 0) {
+      this.latV += G * (2 * this.crown * this.lat) * dt;
+    }
     // 얼라인먼트 편향 + 노면 요철에 의한 횡방향 흔들림 (속도가 붙을수록 커진다)
     if (this.v > 0.3) {
       const rough = (this.rng() - 0.5) * 2 * (0.85 + this.weather.jitter * 8);
       this.latV += (this.alignBias * Math.min(1, this.v / 3) + rough) * dt;
     }
-    // 그립 범위 안이면 횡속도는 마찰로 잦아든다
-    if (need <= grip) this.latV *= Math.exp(-8 * dt);
     this.lat += this.latV * dt;
 
     this.wallHit = 0;
@@ -272,14 +313,12 @@ export class CarSim {
     if (this.lat >= lim.max || this.lat <= lim.min) {
       const atMax = this.lat >= lim.max;
       this.lat = atMax ? lim.max : lim.min;
-      // 벽에 부딪히는 순간의 충격 (사운드/연출용)
       if ((atMax && this.latV > 0) || (!atMax && this.latV < 0)) {
         this.wallHit = Math.abs(this.latV);
-        this.latV = -this.latV * 0.18;         // 약한 반발 (플라스틱/금속 접촉)
+        this.latV = -this.latV * 0.18;
       }
-      // 벽이 받쳐주는 수직항력 = 타이어가 못 낸 구심력 (바깥으로 밀 때만)
-      const pushingIntoWall = (atMax && outward > 0) || (!atMax && outward < 0);
-      if (pushingIntoWall) wallN = Math.max(0, need - grip);
+      const pushingIntoWall = (atMax && slipDir > 0) || (!atMax && slipDir < 0);
+      if (pushingIntoWall) wallN = this.latDemand;
     }
 
     this.wallContact = wallN;
@@ -304,7 +343,9 @@ export class CarSim {
     // ① 순수 코너링 전복: 횡가속이 정적전복한계(SSF·g)를 넘어야 한다. 다이캐스트는
     //    μ_lat(0.25~0.55)이 SSF(≈1.6~3.5)보다 훨씬 작아 항상 미끄러짐이 먼저 온다.
     //    그래서 코너를 돈다고 넘어지는 일은 없다 — 실제와 같다.
-    const aTire = Math.min(this.muLat * N, Math.abs(this.v * this.v * smp.kh));
+    const phi = this.bankOn ? Math.abs(smp.bank) : 0;
+    const aTire = Math.min(this.muLat * N, Math.abs(
+      this.v * this.v * Math.abs(smp.kh) * Math.cos(phi) - G * Math.sin(phi)));
     const dir = this.latOutward;
     const crit = Math.atan2(this.tHalf, this.hCG);     // 무게중심이 바깥 바퀴를 넘는 각도
 

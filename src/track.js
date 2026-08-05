@@ -29,15 +29,20 @@ const CTRL = [
   [3.40, 0.44, 6.40],
   [3.55, 0.42, 7.20],
   [3.62, 0.42, 7.55],
-  [3.62, 0.30, 7.95],
-  [3.55, 0.10, 8.70],
-  [3.50, 0.06, 9.60],
-  [3.42, 0.05, 11.00],
-  [3.40, 0.05, 12.60],
-  [3.40, 0.05, 14.40],
+  [3.62, 0.30, 8.00],
+  [3.58, 0.16, 8.80],
+  [3.54, 0.085, 9.70],
+  [3.50, 0.055, 10.70],
+  [3.46, 0.05, 11.90],
+  [3.43, 0.05, 13.20],
+  [3.40, 0.05, 14.80],
 ];
 
 const N_SAMPLES = 1500;
+// 뱅크 설계 파라미터. FACTOR<1 이면 설계 속도에서도 아주 약간 바깥으로 밀리는
+// '거의 균형' 상태가 되어, 매 주행의 미세한 속도차가 좌우 어느 쪽으로 흐를지를 가른다.
+const BANK_FACTOR = 0.9;
+const BANK_MAX = 1.05;   // 약 60°
 const UP = new THREE.Vector3(0, 1, 0);
 
 function boxSmooth(arr, radius) {
@@ -116,11 +121,14 @@ export class Track {
         kh[i] = dh / ds;
         kv[i] = (slopeAng[i1] - slopeAng[i0]) / ds;
       }
+      const khS = boxSmooth(kh, 4);
+      const dydsS = boxSmooth(dyds, 3);
       this.lanes.push({
         offset, pts, cum,
-        dyds: boxSmooth(dyds, 3),
-        kh: boxSmooth(kh, 4),
+        dyds: dydsS,
+        kh: khS,
         kv: boxSmooth(kv, 4),
+        bank: this._designBank(cum, dydsS, khS, n),
         total: cum[n - 1],
       });
     }
@@ -133,6 +141,35 @@ export class Track {
       lane.finishS = lane.cum[this.finishIdx];
       lane.cpS = this.cpIdx.map((i) => lane.cum[i]);
     }
+  }
+
+  // 뱅크(캔트) 설계 — 실제 트랙 설계와 같은 방식이다.
+  // 먼저 기준 차량이 이 코스를 굴러갈 때의 속도 분포 v(s)를 구하고,
+  // 각 지점을 "그 속도로 지나면 타이어 힘이 필요 없는" 각도로 기울인다.
+  //   tan(φ) = v(s)²·κ(s) / g
+  // 그 결과 기준 속도로 달리는 차는 노면 어디에도 머물 수 있는 *중립* 상태가 되고,
+  // 조금이라도 빠르면 위로, 느리면 아래로 흐른다. 벽에 눌려 모든 차이가 지워지던
+  // 구조가, 작은 차이가 갈라지는 구조로 바뀐다.
+  _designBank(cum, dyds, kh, n) {
+    // 기준 차량(85g·FTE 휠 상당)의 종방향 속도 분포를 한 번 적분해서 얻는다
+    const CRR = 0.012, CDA_M = 0.0073, BEAR = 0.026;
+    const v = new Float32Array(n);
+    let sp = 0;
+    for (let i = 1; i < n; i++) {
+      const ds = Math.max(1e-6, cum[i] - cum[i - 1]);
+      const slope = dyds[i];
+      const cos = Math.sqrt(Math.max(0.05, 1 - slope * slope));
+      const a = -9.81 * slope - (CRR * 9.81 * cos + BEAR + CDA_M * sp * sp);
+      sp = Math.sqrt(Math.max(0.01, sp * sp + 2 * a * ds));
+      v[i] = sp;
+    }
+    v[0] = v[1];
+    const bank = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const ideal = Math.atan((v[i] * v[i] * Math.abs(kh[i])) / 9.81);
+      bank[i] = Math.min(BANK_MAX, ideal * BANK_FACTOR) * Math.sign(kh[i] || 1);
+    }
+    return boxSmooth(bank, 14);
   }
 
   _idxAtCenterFrac(frac) {
@@ -176,6 +213,7 @@ export class Track {
       dyds: lane.dyds[i] * (1 - f) + lane.dyds[i + 1] * f,
       kh: lane.kh[i] * (1 - f) + lane.kh[i + 1] * f,
       kv: lane.kv[i] * (1 - f) + lane.kv[i + 1] * f,
+      bank: lane.bank[i] * (1 - f) + lane.bank[i + 1] * f,
     };
   }
 
@@ -197,10 +235,12 @@ export class Track {
     const ud = obj.userData;
     const smp = this.lanePoint(laneIdx, s, ud.hint || (ud.hint = { idx: 0 }), _pos, _fwd);
     _pos.addScaledVector(UP, alt);
-    // 횡 오프셋 (코너에서 벽으로 밀린 위치)
+    // 뱅크가 있으면 노면이 기울어져 있으므로, 횡오프셋만큼 높이도 함께 올라간다
+    const bank = this.style === 'road' ? (smp.bank || 0) : 0;
     if (opts.lat) {
       _right.set(_fwd.z, 0, -_fwd.x).normalize();
       _pos.addScaledVector(_right, opts.lat);
+      if (bank) _pos.y += -opts.lat * Math.tan(bank);
     }
     obj.position.copy(_pos);
 
@@ -222,10 +262,10 @@ export class Track {
       if (_up.y < 0) { _up.negate(); _right.negate(); }
       _m.makeBasis(_right, _up, _fwd);
       _q.setFromRotationMatrix(_m);
-      // 물리에서 계산된 실제 차체 기울기 (전복 중이면 크게 넘어간다)
-      const roll = opts.roll !== undefined
+      // 노면 뱅크만큼 차도 함께 기울고, 거기에 물리에서 계산된 차체 기울기가 더해진다
+      const roll = (opts.roll !== undefined
         ? -opts.roll
-        : Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012));
+        : Math.max(-0.12, Math.min(0.12, -smp.kh * v * v * 0.012))) - bank;
       if (roll) { _q2.setFromAxisAngle(_Z, roll); _q.multiply(_q2); }
       // 옆으로 미끄러지는 만큼 차체가 비스듬히 틀어진다 (벽을 긁을 때의 그 자세)
       const yaw = Math.max(-0.28, Math.min(0.28, Math.atan2(opts.latV || 0, Math.max(0.5, v))));
@@ -239,6 +279,25 @@ export class Track {
       obj.quaternion.slerp(_q, 0.22);
     }
     return smp;
+  }
+
+  // 뱅크가 적용된 단면 기준틀 — 로드 코스에서는 노면 전체가 코너 바깥쪽으로 들린다.
+  // 횡오프셋 lat 지점의 높이는 −lat·tan(bank) 이 되도록 right/up 을 진행축 둘레로 회전한다.
+  _frame(i, out) {
+    const c = this.center.pos[i], r0 = this.center.right[i], f = this.center.fwd[i];
+    _up.crossVectors(f, r0).normalize();
+    if (_up.y < 0) _up.negate();
+    out.c = c;
+    const phi = this.style === 'road' ? -this.lanes[LANE_COUNT].bank[i] : 0;
+    if (phi) {
+      const cs = Math.cos(phi), sn = Math.sin(phi);
+      out.right = _rt.copy(r0).multiplyScalar(cs).addScaledVector(_up, sn).normalize();
+      out.up = _upB.copy(_up).multiplyScalar(cs).addScaledVector(r0, -sn).normalize();
+    } else {
+      out.right = _rt.copy(r0);
+      out.up = _upB.copy(_up);
+    }
+    return out;
   }
 
   /* ---------------- 메시 생성 ---------------- */
@@ -294,15 +353,14 @@ export class Track {
     const indices = [];
     for (let r = 0; r < rings.length; r++) {
       const i = rings[r];
-      const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
-      _up.crossVectors(fwd, right).normalize();
-      if (_up.y < 0) _up.negate();
+      const fr = this._frame(i, _fr);
+      const c = fr.c, right = fr.right, up = fr.up;
       for (let j = 0; j < P; j++) {
         const [lat, h] = prof[j];
         const idx = (r * P + j) * 3;
-        positions[idx] = c.x + right.x * lat + _up.x * h;
-        positions[idx + 1] = c.y + right.y * lat + _up.y * h;
-        positions[idx + 2] = c.z + right.z * lat + _up.z * h;
+        positions[idx] = c.x + right.x * lat + up.x * h;
+        positions[idx + 1] = c.y + right.y * lat + up.y * h;
+        positions[idx + 2] = c.z + right.z * lat + up.z * h;
       }
       if (r > 0) {
         for (let j = 0; j < P; j++) {
@@ -383,15 +441,13 @@ export class Track {
       if (dashPeriod > 0 && Math.floor(r / dashPeriod) % 2 === 1) continue;
       for (const rr of [r, r + 1]) {
         const i = rings[rr];
-        const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
-        _up.crossVectors(fwd, right).normalize();
-        if (_up.y < 0) _up.negate();
+        const fr = this._frame(i, _fr);
         for (const side of [-1, 1]) {
           const l = lat + side * width / 2;
           positions.push(
-            c.x + right.x * l + _up.x * yOff,
-            c.y + right.y * l + _up.y * yOff,
-            c.z + right.z * l + _up.z * yOff);
+            fr.c.x + fr.right.x * l + fr.up.x * yOff,
+            fr.c.y + fr.right.y * l + fr.up.y * yOff,
+            fr.c.z + fr.right.z * l + fr.up.z * yOff);
         }
       }
       indices.push(vi, vi + 1, vi + 3, vi, vi + 3, vi + 2);
@@ -423,14 +479,12 @@ export class Track {
       for (let r = 0; r < rings.length - 1; r++) {
         for (const rr of [r, r + 1]) {
           const i = rings[rr];
-          const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
-          _up.crossVectors(fwd, right).normalize();
-          if (_up.y < 0) _up.negate();
+          const fr = this._frame(i, _fr);
           for (const h of [y0, y1]) {
             positions.push(
-              c.x + right.x * (lat + off) + _up.x * h,
-              c.y + right.y * (lat + off) + _up.y * h,
-              c.z + right.z * (lat + off) + _up.z * h);
+              fr.c.x + fr.right.x * (lat + off) + fr.up.x * h,
+              fr.c.y + fr.right.y * (lat + off) + fr.up.y * h,
+              fr.c.z + fr.right.z * (lat + off) + fr.up.z * h);
           }
         }
         indices.push(vi, vi + 1, vi + 3, vi, vi + 3, vi + 2);
@@ -450,15 +504,14 @@ export class Track {
     const postGeo = new THREE.BoxGeometry(0.0035, 0.021, 0.0035);
     for (let r = 4; r < rings.length; r += 9) {
       const i = rings[r];
-      const c = this.center.pos[i], right = this.center.right[i], fwd = this.center.fwd[i];
-      _up.crossVectors(fwd, right).normalize();
-      if (_up.y < 0) _up.negate();
+      const fr = this._frame(i, _fr);
+      const c = fr.c, right = fr.right, fwd = this.center.fwd[i];
       const post = new THREE.Mesh(postGeo, postMat);
       post.position.set(
-        c.x + right.x * lat + _up.x * 0.0075,
-        c.y + right.y * lat + _up.y * 0.0075,
-        c.z + right.z * lat + _up.z * 0.0075);
-      _m.makeBasis(right, _up, new THREE.Vector3(fwd.x, 0, fwd.z).normalize());
+        c.x + right.x * lat + fr.up.x * 0.0075,
+        c.y + right.y * lat + fr.up.y * 0.0075,
+        c.z + right.z * lat + fr.up.z * 0.0075);
+      _m.makeBasis(right, fr.up, new THREE.Vector3(fwd.x, 0, fwd.z).normalize());
       post.quaternion.setFromRotationMatrix(_m);
       post.castShadow = true;
       g.add(post);
@@ -612,6 +665,9 @@ const _up = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
+const _rt = new THREE.Vector3();
+const _upB = new THREE.Vector3();
+const _fr = { c: null, right: null, up: null };
 const _X = new THREE.Vector3(1, 0, 0);
 const _Y = new THREE.Vector3(0, 1, 0);
 const _Z = new THREE.Vector3(0, 0, 1);
