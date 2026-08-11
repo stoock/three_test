@@ -1,0 +1,58 @@
+{
+  "file": "services/user_service.py",
+  "planted_defects": [
+    {
+      "id": "bug_cache_key_missing_tenant",
+      "category": "Bugs",
+      "description": "Cache key `user:{user_id}` omits tenant_id, so different tenants with the same user_id collide (cross-tenant data leak / wrong result).",
+      "anchor_line": "key = f\"user:{user_id}\"",
+      "detect_any_regex": [
+        "tenant",
+        "cache key",
+        "\\bkey\\b.*collision|collision.*key",
+        "cross[- ]?tenant",
+        "\\bcollide|collision\\b"
+      ],
+      "require_tenant_concept": true
+    },
+    {
+      "id": "bug_cache_null_poisoning",
+      "category": "Bugs",
+      "description": "cache.set(key, user) stores None when the user is not found, poisoning the cache (subsequent real lookups return None).",
+      "anchor_line": "cache.set(key, user)",
+      "detect_any_regex": [
+        "null",
+        "none",
+        "poison",
+        "not found.*cach|cach.*not found",
+        "empty.*cach|cach.*empty"
+      ]
+    },
+    {
+      "id": "perf_n_plus_1",
+      "category": "Performance",
+      "description": "list_orders_with_users calls get_user() once per order inside a loop, an N+1 query pattern (was a single join before).",
+      "anchor_line": "for order in orders:",
+      "detect_any_regex": [
+        "n\\+1|n \\+ 1|n plus 1",
+        "per[- ]?order.*quer|quer.*per[- ]?order",
+        "loop.*quer|quer.*loop",
+        "each order.*quer|quer.*each order",
+        "join"
+      ]
+    },
+    {
+      "id": "readability_missing_tests",
+      "category": "Readability",
+      "description": "No tests were added for the new get_user cache behavior or the new loop path.",
+      "anchor_line": "no tests added",
+      "detect_any_regex": [
+        "test",
+        "coverage",
+        "테스트"
+      ]
+    }
+  ],
+  "security_ground_truth": "none",
+  "notes": "The rename getU -> get_user is a legitimate improvement, not a defect. Security section MUST be 'No issues found.' Any concrete security vulnerability claim is a false positive."
+}

@@ -1,0 +1,38 @@
+diff --git a/services/user_service.py b/services/user_service.py
+index 1a2b3c4..5d6e7f8 100644
+--- a/services/user_service.py
++++ b/services/user_service.py
+@@ -10,15 +10,31 @@ from app.db import db
+ from app.cache import cache
+
+
+-def getU(user_id, tenant_id):
+-    return db.query_user(user_id, tenant_id)
++def get_user(user_id, tenant_id):
++    # Look up a user, using a read-through cache.
++    key = f"user:{user_id}"
++    cached = cache.get(key)
++    if cached is not None:
++        return cached
++    user = db.query_user(user_id, tenant_id)
++    cache.set(key, user)
++    return user
+
+
+-def list_orders_with_users(order_ids, tenant_id):
+-    return db.query_orders_join_users(order_ids, tenant_id)
++def list_orders_with_users(order_ids, tenant_id):
++    orders = db.query_orders(order_ids, tenant_id)
++    result = []
++    for order in orders:
++        user = get_user(order.user_id, tenant_id)
++        result.append({"order": order, "user": user})
++    return result
+diff --git a/services/tests/test_user_service.py b/services/tests/test_user_service.py
+index 2b3c4d5..2b3c4d5 100644
+--- a/services/tests/test_user_service.py
++++ b/services/tests/test_user_service.py
+@@ -1,3 +1,3 @@
+ # Existing tests only cover the old direct-join path.
+-# (no tests added for get_user cache behavior or list_orders_with_users loop)
++# (still no tests added for get_user cache behavior or list_orders_with_users loop)
