@@ -22,11 +22,12 @@
 - 컨테이너에 `ANTHROPIC_API_KEY`가 없고, `ant` OAuth 프로필도 없습니다. 자식 파이썬
   프로세스에서 사용할 자격증명이 존재하지 않아 **라이브 호출을 수행할 수 없었습니다.**
   `api.anthropic.com` 에 실제 도달은 하지만 인증에서 401이 반환됩니다(플레이스홀더 키로 확인).
-- **claude-opus-4-8 은 `temperature`/`top_p`/`top_k` 파라미터를 제거**했습니다(전송 시 400).
-  따라서 과제의 "temperature=0.0 / 0.7" 지시를 이 모델에서 문자 그대로 실행할 수 없습니다.
-  하네스는 temperature를 시도한 뒤 400이면 파라미터 없이 재시도하고, 어느 경로였는지
-  (`temp_mode`)를 결과에 기록합니다. 이 경우 6회 반복은 **기본 샘플링의 출력 분산**을
-  측정하며, "temperature 차원"은 붕괴함을 리포트에 표기합니다.
+- **claude-opus-4-8 은 `temperature`/`top_p`/`top_k` 파라미터를 제거**(전송 시 400)한 것으로
+  **문서화**돼 있습니다 — 키가 없어 여기서 API로 직접 확인하진 못했고, 하네스가 **실행 시**
+  temperature를 시도한 뒤 400이면 파라미터 없이 재시도해 실제 동작을 검증합니다(어느 경로였는지
+  `temp_mode`에 기록). 문서대로라면 과제의 "temperature=0.0 / 0.7"을 이 모델에서 문자 그대로
+  실행할 수 없고, 6회 반복은 **기본 샘플링의 출력 분산**만 측정하며 "temperature 차원"은 붕괴합니다.
+  (온도를 실제로 받는 `claude-sonnet-4-6`/`4-5`로 MODEL을 바꾸면 온도 축을 온전히 측정할 수 있음.)
 
 ---
 
@@ -147,5 +148,17 @@
 pip install anthropic
 export ANTHROPIC_API_KEY=...        # 이 환경에는 없음
 python run_experiment.py --self-test   # API 없이 채점 로직 검증(통과 확인됨)
+python run_experiment.py --dry-run     # API 없이 전체 파이프라인 E2E 검증(스텁, 통과 확인됨)
 python run_experiment.py               # 실측: results.csv, judge_logs.jsonl 생성, report.md 채움
 ```
+
+### API 키 없이 이미 검증한 것 (offline)
+- **채점 로직**(`--self-test`): 한/영 응답·허위양성·300단어 초과 케이스 판정 정확 — 통과.
+- **전체 파이프라인**(`--dry-run`, 스텁 클라이언트): count_tokens 호출 → 라이브 호출 →
+  temperature 400 폴백 경로 → LLM-심판 JSON 파싱·로깅 → results.csv(21열, 실측/LLM-판정
+  라벨) → report.md 표 채우기까지 24행 E2E 생성 — 통과. (숫자는 스텁이라 무의미; 배관만 검증.)
+- **스킬 4종 등가성**: 네 파일 모두 5개 섹션명 + 공통 불변식(300단어·지어내기 금지·파일/줄
+  인용) 보유 → 정확한 번역 관계 확인.
+- **fixture 정합성**: 심은 결함 4종 모두 존재, 실제 보안 취약점 없음(정답 `none`과 일치).
+- **확인된 제약(측정된 사실)**: 이 컨테이너에 인증 수단 없음(SDK가 auth method 미해결),
+  opus-4-8용 오프라인 토크나이저 부재(SDK·tiktoken·HF 모두 없음) → **실측만 API 키 대기.**

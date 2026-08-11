@@ -260,12 +260,94 @@ def create_review(client, system, user, want_temperature):
 
 
 # --------------------------------------------------------------------------- #
+# Offline stub client for --dry-run (proves the pipeline; NOT a measurement)   #
+# --------------------------------------------------------------------------- #
+class _Blk:
+    def __init__(self, text):
+        self.type = "text"
+        self.text = text
+
+
+class _Usage:
+    def __init__(self, i, o):
+        self.input_tokens = i
+        self.output_tokens = o
+
+
+class _Resp:
+    def __init__(self, text, i, o):
+        self.content = [_Blk(text)]
+        self.usage = _Usage(i, o)
+
+
+_FAKE_REVIEW_KO = """## Summary
+services/user_service.py 변경. 캐시 키 tenant_id 누락, null 캐싱, N+1 문제가 있습니다.
+## Bugs
+- 캐시 키 `user:{user_id}`에 tenant_id가 없어 테넌트 간 충돌 (line 14).
+- cache.set(key, user)가 not found 시 None을 캐싱하여 오염됩니다.
+## Security
+No issues found.
+## Performance
+list_orders_with_users가 루프에서 주문마다 get_user를 호출하는 N+1 쿼리입니다.
+## Readability
+새 경로에 대한 테스트가 없습니다.
+"""
+_FAKE_REVIEW_EN = """## Summary
+Change in services/user_service.py: missing tenant_id in cache key, null caching, N+1.
+## Bugs
+- Cache key `user:{user_id}` omits tenant_id, causing cross-tenant collision (line 14).
+- cache.set(key, user) caches None when not found, poisoning the cache.
+## Security
+No issues found.
+## Performance
+list_orders_with_users calls get_user per order inside a loop — an N+1 query.
+## Readability
+No tests added for the new code path.
+"""
+_FAKE_JUDGE = ('{"detected": {"bug_cache_key_missing_tenant": true, '
+               '"bug_cache_null_poisoning": true, "perf_n_plus_1": true, '
+               '"readability_missing_tests": true}, "hallucinated_issues": [], '
+               '"review_language": "%s", "notes": "stub"}')
+
+
+class _StubMessages:
+    def __init__(self):
+        self._n = 0
+
+    def count_tokens(self, model, system, messages):
+        user = messages[0]["content"]
+        # crude fake: bytes/3, differs per variant so multiples look plausible
+        return _Usage(int((len(system.encode()) + len(user.encode())) / 3), 0)
+
+    def create(self, model=None, max_tokens=None, system=None, messages=None,
+               temperature=None):
+        # mimic opus-4-8 rejecting temperature so the fallback path is exercised
+        if temperature is not None:
+            raise RuntimeError("temperature: unexpected parameter (stub)")
+        self._n += 1
+        is_ko = bool(re.search(r"[가-힣]", system or ""))
+        if (system or "").startswith("You are a strict grader"):
+            lang = "ko" if re.search(r"[가-힣]", messages[0]["content"].split("REVIEW")[-1]) else "en"
+            return _Resp(_FAKE_JUDGE % lang, 300, 60 + self._n % 3)
+        text = _FAKE_REVIEW_KO if is_ko else _FAKE_REVIEW_EN
+        return _Resp(text, 400, 120 + (self._n % 5) * 4)  # tiny variance for std
+
+
+class StubClient:
+    def __init__(self):
+        self.messages = _StubMessages()
+
+
+# --------------------------------------------------------------------------- #
 # Main                                                                         #
 # --------------------------------------------------------------------------- #
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true",
                     help="Run offline scoring checks only; makes no API calls.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Exercise the FULL pipeline offline with a stub client "
+                         "(no API, no real tokens/accuracy). Proves the plumbing.")
     args = ap.parse_args()
 
     diff, gt, skills = load_inputs()
@@ -273,11 +355,16 @@ def main():
     if args.self_test:
         return self_test(diff, gt)
 
-    import anthropic
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        sys.exit("ERROR: ANTHROPIC_API_KEY is not set. Cannot perform live "
-                 "measurement. Nothing was measured; no results written.")
-    client = anthropic.Anthropic()
+    if args.dry_run:
+        print("DRY RUN: stub client, NO API calls. Numbers below are FAKE — "
+              "they only prove the pipeline runs end to end.\n")
+        client = StubClient()
+    else:
+        import anthropic
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            sys.exit("ERROR: ANTHROPIC_API_KEY is not set. Cannot perform live "
+                     "measurement. Nothing was measured; no results written.")
+        client = anthropic.Anthropic()
 
     rows = []
     judge_log = open(HERE / "judge_logs.jsonl", "w", encoding="utf-8")
